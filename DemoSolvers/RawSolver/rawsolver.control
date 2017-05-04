@@ -1,0 +1,7 @@
+# Dedicated Sodoku Solver
+comment = 'Solves LP/MIP problems, given (raw) tables of unknown variables and constraints (by Laurynas)'
+default_version = '1.0'
+module_pathname = '$libdir/rawsolver'
+requires = 'solverapi, solverlp'
+relocatable = false
+schema = public

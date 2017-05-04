@@ -1,0 +1,7 @@
+# SwarmOPS blackbox solver extension
+comment = 'SwarmOPS blackbox solver for PostreSQL 9.2 (by Laurynas)'
+default_version = '1.0'
+module_pathname = '$libdir/solversw'
+requires = 'solverapi'
+relocatable = false
+schema = public

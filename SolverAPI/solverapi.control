@@ -1,0 +1,6 @@
+# SolverAPI extension
+comment = 'A solver API for PostreSQL 9.2 (by Laurynas)'
+default_version = '1.2'
+module_pathname = '$libdir/solverapi'
+relocatable = false
+schema = public

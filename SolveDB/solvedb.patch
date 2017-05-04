@@ -1,0 +1,618 @@
+diff -ruN postgresql-9.6.0_org/src/backend/nodes/copyfuncs.c postgresql-9.6.0/src/backend/nodes/copyfuncs.c
+--- postgresql-9.6.0_org/src/backend/nodes/copyfuncs.c	2016-09-26 22:26:58.000000000 +0200
++++ postgresql-9.6.0/src/backend/nodes/copyfuncs.c	2016-10-27 13:50:39.000000000 +0200
+@@ -2536,6 +2536,7 @@
+ 	COPY_NODE_FIELD(functions);
+ 	COPY_NODE_FIELD(alias);
+ 	COPY_NODE_FIELD(coldeflist);
++	COPY_NODE_FIELD(coldef_subquery);
+ 
+ 	return newnode;
+ }
+diff -ruN postgresql-9.6.0_org/src/backend/nodes/equalfuncs.c postgresql-9.6.0/src/backend/nodes/equalfuncs.c
+--- postgresql-9.6.0_org/src/backend/nodes/equalfuncs.c	2016-09-26 22:26:58.000000000 +0200
++++ postgresql-9.6.0/src/backend/nodes/equalfuncs.c	2016-10-27 13:51:09.000000000 +0200
+@@ -2323,6 +2323,7 @@
+ 	COMPARE_NODE_FIELD(functions);
+ 	COMPARE_NODE_FIELD(alias);
+ 	COMPARE_NODE_FIELD(coldeflist);
++	COMPARE_NODE_FIELD(coldef_subquery);
+ 
+ 	return true;
+ }
+diff -ruN postgresql-9.6.0_org/src/backend/nodes/outfuncs.c postgresql-9.6.0/src/backend/nodes/outfuncs.c
+--- postgresql-9.6.0_org/src/backend/nodes/outfuncs.c	2016-09-26 22:26:58.000000000 +0200
++++ postgresql-9.6.0/src/backend/nodes/outfuncs.c	2016-10-27 13:51:33.000000000 +0200
+@@ -3133,6 +3133,7 @@
+ 	WRITE_NODE_FIELD(functions);
+ 	WRITE_NODE_FIELD(alias);
+ 	WRITE_NODE_FIELD(coldeflist);
++	WRITE_NODE_FIELD(coldef_subquery);
+ }
+ 
+ static void
+diff -ruN postgresql-9.6.0_org/src/backend/parser/gram.y postgresql-9.6.0/src/backend/parser/gram.y
+--- postgresql-9.6.0_org/src/backend/parser/gram.y	2016-09-26 22:26:58.000000000 +0200
++++ postgresql-9.6.0/src/backend/parser/gram.y	2017-04-12 13:13:57.000000000 +0200
+@@ -132,6 +132,15 @@
+ #define parser_yyerror(msg)  scanner_yyerror(msg, yyscanner)
+ #define parser_errposition(pos)  scanner_errposition(pos, yyscanner)
+ 
++/* SolveDB BEGIN */
++
++#define parser_str_from_scanbuf(loc, len) scanner_str_from_scanbuf(loc, len, yyscanner)
++static FuncCall *makeSolveCall(char *input_sql, char *input_alias, List *cols_unknown, List *ctes, char obj_dir, char *obj_sql, List *ctr_sql,  /* Problem arguments */
++			       char *solver_name, char *method_name, List *par_val_pairs, int location); 			    /* Solver arguments */
++static TypeName *SystemArrayTypeName(char *name, int numDim);
++
++/* SolveDB END */
++
+ static void base_yyerror(YYLTYPE *yylloc, core_yyscan_t yyscanner,
+ 						 const char *msg);
+ static Node *makeColumnRef(char *colname, List *indirection,
+@@ -266,6 +275,7 @@
+ 		DropOwnedStmt ReassignOwnedStmt
+ 		AlterTSConfigurationStmt AlterTSDictionaryStmt
+ 		CreateMatViewStmt RefreshMatViewStmt CreateAmStmt
++		SolveStmt
+ 
+ %type <node>	select_no_parens select_with_parens select_clause
+ 				simple_select values_clause
+@@ -540,6 +550,17 @@
+ %type <str>		opt_existing_window_name
+ %type <boolean> opt_if_not_exists
+ 
++
++/* SolveDB BEGIN */
++
++%type <list>	opt_solve_maxmin_clause opt_solve_colid_list solve_colid_list opt_solve_subto_clause solve_selectstmt_list opt_solver_params solver_params opt_solve_cte_clause solve_cte_clause_exp_list solve_cte_clause_exp
++%type <chr>		solve_maxminimize
++%type <node>	solve_selectstmt
++%type <str>		op_solve_input_name opt_solvermethod
++%type <defelt>	solver_param
++
++/* SolveDB END */
++
+ /*
+  * Non-keyword token types.  These are hard-wired into the "flex" lexer.
+  * They must be listed first so that their numeric codes do not depend on
+@@ -606,7 +627,7 @@
+ 	LEADING LEAKPROOF LEAST LEFT LEVEL LIKE LIMIT LISTEN LOAD LOCAL
+ 	LOCALTIME LOCALTIMESTAMP LOCATION LOCK_P LOCKED LOGGED
+ 
+-	MAPPING MATCH MATERIALIZED MAXVALUE METHOD MINUTE_P MINVALUE MODE MONTH_P MOVE
++	MAPPING MATCH MATERIALIZED MAXIMIZE MAXVALUE METHOD MINIMIZE MINUTE_P MINVALUE MODE MONTH_P MOVE
+ 
+ 	NAME_P NAMES NATIONAL NATURAL NCHAR NEXT NO NONE
+ 	NOT NOTHING NOTIFY NOTNULL NOWAIT NULL_P NULLIF
+@@ -627,9 +648,9 @@
+ 	ROW ROWS RULE
+ 
+ 	SAVEPOINT SCHEMA SCROLL SEARCH SECOND_P SECURITY SELECT SEQUENCE SEQUENCES
+-	SERIALIZABLE SERVER SESSION SESSION_USER SET SETS SETOF SHARE SHOW
+-	SIMILAR SIMPLE SKIP SMALLINT SNAPSHOT SOME SQL_P STABLE STANDALONE_P START
+-	STATEMENT STATISTICS STDIN STDOUT STORAGE STRICT_P STRIP_P SUBSTRING
++	SERIALIZABLE SERVER SESSION SESSION_USER SET SETS SETOF SHARE SHOW	
++	SIMILAR SIMPLE SKIP SMALLINT SNAPSHOT SOLVESELECT SOME SQL_P STABLE STANDALONE_P START
++	STATEMENT STATISTICS STDIN STDOUT STORAGE STRICT_P STRIP_P SUBJECTTO SUBSTRING
+ 	SYMMETRIC SYSID SYSTEM_P
+ 
+ 	TABLE TABLES TABLESAMPLE TABLESPACE TEMP TEMPLATE TEMPORARY TEXT_P THEN
+@@ -672,7 +693,8 @@
+ %left		AND
+ %right		NOT
+ %nonassoc	IS ISNULL NOTNULL	/* IS sets precedence for IS NULL, etc */
+-%nonassoc	'<' '>' '=' LESS_EQUALS GREATER_EQUALS NOT_EQUALS
++/* SolveDB fix: Introduce the associativity to the comparison operators */
++%left		'<' '>' '=' LESS_EQUALS GREATER_EQUALS NOT_EQUALS
+ %nonassoc	BETWEEN IN_P LIKE ILIKE SIMILAR NOT_LA
+ %nonassoc	ESCAPE			/* ESCAPE must be just above LIKE/ILIKE/SIMILAR */
+ %left		POSTFIXOP		/* dummy for postfix Op rules */
+@@ -883,6 +905,165 @@
+ 			| /*EMPTY*/
+ 				{ $$ = NULL; }
+ 		;
++		
++		
++/*****************************************************************************
++ *
++ *		SOLVESELECT [<column_id> [, ...] IN ]  ( SelectStmt ) [ AS name ]
++ *		[WITH       [<column_id> [, ...] IN ]  ( SelectStmt )   AS name [, ...] ]		
++ *		[MAXIMIZE | MINIMIZE ( SelectStmt ) ]
++ *		[SUBJECTTO [ (SelectStmt) [, ...] ] 
++ * 		[USING solver [.method] ( [param [:= param_value], [,...] ])
++ *
++ *	 	WHERE
++ *                - param_value:  [ numeric | ( SelectStmt ) ]
++ *
++ *****************************************************************************/
++
++SolveStmt: SOLVESELECT opt_solve_colid_list '(' SelectStmt ')' op_solve_input_name opt_solve_cte_clause opt_solve_maxmin_clause opt_solve_subto_clause 
++           USING name opt_solvermethod opt_solver_params
++				{
++						SelectStmt *n;
++						ColumnRef *cr;
++						ResTarget *rt;
++						RangeFunction *r;
++						Alias *a;
++						char *input_sql;
++						char *input_alias = $6 != NULL ? $6 : "input_relation";
++						List *mm_clause = $8;
++
++						/* Make an alias for the select statements */
++						a = makeNode(Alias);
++						a->aliasname = input_alias;
++				
++						/* Read an input SQL as string */
++						input_sql = parser_str_from_scanbuf(@3+1, @5-@3-1);
++						Assert(input_sql != NULL && input_sql[0] != '\0');	 /* This cannot happen */
++
++						r = makeNode(RangeFunction);
++						r->lateral = false;
++						r->ordinality = false;
++						r->is_rowsfrom = false;
++						r->alias = a;
++						r->coldeflist = NULL;
++						r->coldef_subquery = $4;
++						r->functions = list_make1(list_make2( 
++	 						makeSolveCall(input_sql,  /* Input SQL */
++	 								  input_alias,/* Alias of the input */
++								      $2,         /* A list of unknown columns */
++									  $7,		  /* CTEs list */
++	 							      mm_clause != NULL ? ((char ) (long) (void *) list_nth(mm_clause, 0)) : 'u',  /* Objective direction */
++								      mm_clause != NULL ? (char *) list_nth(mm_clause, 1) : NULL,       /* Objective SQL */
++							 	      $9, 	  /* A list of subject to SQL statements */
++								      $11, 	  /* A name of the solver */
++								      $12, 	  /* A name of the solve method */
++								      $13, 	  /* A solver method parameters */
++								      @11), NIL));	  /* On error, stops at the solver's name location */
++
++						cr = makeNode(ColumnRef);
++						cr->fields = list_make1(makeNode(A_Star));
++						cr->location = -1;
++
++						rt = makeNode(ResTarget);
++						rt->name = NULL;
++						rt->indirection = NIL;
++						rt->val = (Node *)cr;
++						rt->location = -1;				
++
++						n = makeNode(SelectStmt);
++						n->targetList = list_make1(rt);
++						n->fromClause = list_make1(r);
++						$$ = (Node *) n;
++				}
++		;
++
++opt_solve_colid_list:		solve_colid_list IN_P	{ $$ = $1; }
++				| 			{ $$ = NIL; }
++		;
++
++solve_colid_list: 			ColId					{ $$ = list_make1(makeStringConst($1,  @1));	}
++				| 			'*'						{ $$ = list_make1(makeStringConst("*", @1)); } 
++				| ColId ',' solve_colid_list		{ $$ = lappend($3, makeStringConst($1, @1)); 	}
++		;
++				
++op_solve_input_name:	    AS name 		    { $$ = $2; }
++                | /* Empty */					{ $$ = NULL; }
++        ;
++
++opt_solve_cte_clause:       WITH solve_cte_clause_exp_list { $$ = $2;  }
++                | /* Empty */	      					   { $$ = NIL; }
++        ;
++
++solve_cte_clause_exp_list:  solve_cte_clause_exp   { $$ = list_make1($1); }
++				|			solve_cte_clause_exp ',' solve_cte_clause_exp_list { $$ = lcons($1, $3); }
++		;
++				
++solve_cte_clause_exp:	opt_solve_colid_list '(' SelectStmt ')' AS name 
++					{
++						char * sql = parser_str_from_scanbuf(@2+1, @4-@2-1);
++						/* This cannot happen */
++						Assert(sql != NULL && sql[0] != '\0');
++						$$ = list_make3($1, makeStringConst(sql, @3), $6); 
++					}
++		;
++
++opt_solve_maxmin_clause: 	solve_maxminimize '(' SelectStmt ')'
++				{
++					char   obj_dir = $1;
++					char * obj_sql;
++
++					obj_sql = parser_str_from_scanbuf(@2+1, @4-@2-1);
++					/* This cannot happen */
++					Assert(obj_sql != NULL && obj_sql[0] != '\0'); 
++					$$ = list_make2((void *) (long) obj_dir, obj_sql);	/* We don't put into a constant as this is short-lived */
++				}
++				| /* Empty */ { $$ = NULL; }
++		;
++
++solve_maxminimize: 	        MAXIMIZE	{ $$ = 'a'; } 
++				| 		    MINIMIZE	{ $$ = 'i'; }
++				| /* Empty */ 	{ $$ = 'u'; } /* Undefined */
++		;
++
++opt_solve_subto_clause:		SUBJECTTO solve_selectstmt_list			{ $$ = $2; }
++				| /* Empty */   									{ $$ = NIL; } 
++		;
++
++solve_selectstmt_list:		solve_selectstmt 							{ $$ = list_make1($1); } 
++				| 			solve_selectstmt ',' solve_selectstmt_list	{ $$ = lcons($1, $3); }
++		;
++
++solve_selectstmt:		'(' SelectStmt ')'
++				{
++	                       		char * sql = parser_str_from_scanbuf(@1+1, @3-@1-1);
++								/* This cannot happen */
++								Assert(sql != NULL && sql[0] != '\0'); 
++								$$ = makeStringConst(sql, @2);
++				}
++		;
++
++opt_solvermethod:		'.' name	{ $$ = $2;   };
++				| /* Empty */		{ $$ = NULL; };
++		;
++
++opt_solver_params:		'(' solver_params ')' 	{ $$ = $2; }
++				| /* Empty */ 	      			{ $$ = NIL; }
++		;
++
++solver_params:  		solver_param				{ $$ = list_make1($1);  }
++				| solver_param ',' solver_params	{ $$ = lappend($3, $1);	}
++				| /* Empty */ 	      				{ $$ = NIL; }
++	    ;
++
++solver_param:			param_name 				{ $$ = makeDefElem($1, NULL); }
++				| 		param_name COLON_EQUALS a_expr
++				{
++					$$ = makeDefElem($1, (Node *) $3);
++				}
++		;
++
++
++
+ 
+ /*****************************************************************************
+  *
+@@ -10151,6 +10332,7 @@
+ 					$$ = (Node *)n;
+ 				}
+ 			| values_clause							{ $$ = $1; }
++			| SolveStmt
+ 			| TABLE relation_expr
+ 				{
+ 					/* same as SELECT * FROM relation_expr */
+@@ -14150,6 +14332,8 @@
+ 			| LIMIT
+ 			| LOCALTIME
+ 			| LOCALTIMESTAMP
++			| MAXIMIZE
++			| MINIMIZE
+ 			| NOT
+ 			| NULL_P
+ 			| OFFSET
+@@ -14163,7 +14347,9 @@
+ 			| RETURNING
+ 			| SELECT
+ 			| SESSION_USER
++			| SOLVESELECT
+ 			| SOME
++			| SUBJECTTO
+ 			| SYMMETRIC
+ 			| TABLE
+ 			| THEN
+@@ -14992,6 +15178,124 @@
+ 	return (Node *) s;
+ }
+ 
++
++/* 
++ * Create and populate a function call based on SolveSelect.
++ */
++static FuncCall *makeSolveCall(char *input_sql, char *input_alias, List *cols_unknown, List *ctes, char obj_dir, char *obj_sql, List *ctr_sql,  /* Problem arguments */
++				 char *solver_name, char *method_name, List *par_val_pairs, int location)			    /* Solver arguments */
++{
++	ListCell *c;
++	FuncCall *n;
++	RowExpr  *ap; /* A record type to define a problem */
++	RowExpr  *aq; /* A record type to define solve query */
++	List	 *pctes;  /* CTEs */
++	TypeName *ctetn;  /* The type name sl_cte_relation[] */
++ 	List	 *spars; /* Solver parameters */
++	
++	/* 2016-11-01 CTE support */
++	/* Build CTE expressions */
++	pctes = NIL;
++	foreach(c, ctes)
++	{
++		List * e = (List *) lfirst(c);
++		
++		RowExpr * ce = makeNode(RowExpr);
++		ce->row_typeid = InvalidOid;	/* not analyzed yet */
++		ce->colnames = NIL;	/* to be filled in during analysis */
++		ce->location = location;
++		ce->args = NIL;
++		ce->args = lappend(ce->args, list_nth(e, 1));
++		ce->args = lappend(ce->args, makeStringConst(list_nth(e, 2), location));	
++		ce->args = lappend(ce->args, makeTypeCast(makeAArrayExpr(list_nth(e, 0), location), SystemArrayTypeName("text", 1), location));
++			
++		pctes = lappend(pctes,  makeTypeCast((Node *) ce, makeTypeNameFromNameList(list_make1(makeString("sl_cte_relation"))), location));
++	}
++	/* Build CTE type name */
++	ctetn = makeTypeNameFromNameList(list_make1(makeString("sl_cte_relation")));
++	ctetn->arrayBounds = lappend(ctetn->arrayBounds, makeInteger(-1));
++        
++	/* Build a problem argument */	
++	aq = makeNode(RowExpr);
++	aq->row_typeid = InvalidOid;	/* not analyzed yet */
++	aq->colnames = NIL;	/* to be filled in during analysis */
++	aq->location = location;
++	aq->args = NIL;
++	aq->args = lappend(aq->args, makeStringConst(input_sql, location));	  /* Input SQL statement */
++	aq->args = lappend(aq->args, input_alias != NULL ? makeStringConst(input_alias, location) : makeNullAConst(location));     /* Alias of the input */
++	aq->args = lappend(aq->args, makeTypeCast(makeAArrayExpr(cols_unknown, location), SystemArrayTypeName("text", 1), location));
++	aq->args = lappend(aq->args, makeStringConst(obj_dir=='a'?"maximize": 
++						     obj_dir=='i'?"minimize": "undefined", location));
++	aq->args = lappend(aq->args, obj_sql != NULL ? makeStringConst(obj_sql, location) : makeNullAConst(location));
++	aq->args = lappend(aq->args, makeTypeCast(makeAArrayExpr(ctr_sql, location), SystemArrayTypeName("text", 1), location));	
++	aq->args = lappend(aq->args, makeTypeCast(makeAArrayExpr(pctes, location), ctetn, location));
++	/* makeNullAConst(location)*/
++
++	/* Build solver parameters */
++	spars = NIL;
++	foreach(c, par_val_pairs)
++	{
++		DefElem * e = (DefElem *) lfirst(c);
++		spars = lappend(spars, makeAArrayExpr(
++					list_make2(makeStringConst(e->defname, location), 
++						   e->arg != NULL ? makeTypeCast(e->arg, SystemTypeName("text"), location) : makeNullAConst(location)),
++						       location));
++	}	
++
++	/* Build an argument for a solve call  */
++	ap = makeNode(RowExpr);
++	ap->row_typeid = InvalidOid;	/* not analyzed yet */
++	ap->colnames = NIL;	/* to be filled in during analysis */
++	ap->location = location;
++	ap->args = NIL;
++    ap->args = lappend(ap->args, makeTypeCast((Node *) aq, 
++				     makeTypeNameFromNameList(list_make1(makeString("sl_problem"))),
++				     location));
++    ap->args = lappend(ap->args, makeStringConst(solver_name, location));
++	ap->args = lappend(ap->args, method_name == NULL ? makeNullAConst(location) : makeStringConst(method_name, location));
++
++	/* Buld the function call */
++	n = makeNode(FuncCall);
++	n->funcname = list_make1(makeString("sl_solve"));		/* An unqualified name of "sl_solve" method. We expect it to be residient in PG extension SolverAPI */
++	n->args = list_make2(
++		     /* First argument: sl_solve_query */
++	             makeTypeCast((Node *) ap, 
++			                  makeTypeNameFromNameList(list_make1(makeString("sl_solve_query"))),
++			                  location),
++		     /* First argument: text[][] */
++		     makeTypeCast(spars != NULL ? makeAArrayExpr(spars, location) : makeNullAConst(location), 
++						      SystemArrayTypeName("text", 2), location)
++			     ); 
++	n->agg_order = NIL;
++	n->agg_star = FALSE;
++	n->agg_distinct = FALSE;
++	n->func_variadic = FALSE;
++	n->over = NULL;
++	n->location = location; 
++
++	return n;
++}
++
++/* SystemArrayTypeName()
++ * Build a properly-qualified reference to an array of a built-in type.
++ *
++ * numDim - a number of array dimensions
++ */
++TypeName *
++SystemArrayTypeName(char *name, int numDim)
++{
++	TypeName * tn = SystemTypeName(name);
++	int i;
++
++	for (i=0; i< numDim; i++)
++		tn->arrayBounds = lappend(tn->arrayBounds, makeInteger(-1));
++
++	return tn;
++}
++
++
++
++
+ /* parser_init()
+  * Initialize to parse one query string
+  */
+diff -ruN postgresql-9.6.0_org/src/backend/parser/parse_relation.c postgresql-9.6.0/src/backend/parser/parse_relation.c
+--- postgresql-9.6.0_org/src/backend/parser/parse_relation.c	2016-09-26 22:26:58.000000000 +0200
++++ postgresql-9.6.0/src/backend/parser/parse_relation.c	2016-10-21 10:48:23.000000000 +0200
+@@ -27,6 +27,7 @@
+ #include "parser/parsetree.h"
+ #include "parser/parse_relation.h"
+ #include "parser/parse_type.h"
++#include "parser/analyze.h"
+ #include "utils/builtins.h"
+ #include "utils/lsyscache.h"
+ #include "utils/rel.h"
+@@ -1388,6 +1389,7 @@
+ {
+ 	RangeTblEntry *rte = makeNode(RangeTblEntry);
+ 	Alias	   *alias = rangefunc->alias;
++	Node 	   *coldef_subquery = rangefunc->coldef_subquery;
+ 	Alias	   *eref;
+ 	char	   *aliasname;
+ 	int			nfuncs = list_length(funcexprs);
+@@ -1457,7 +1459,7 @@
+ 		 * A coldeflist is required if the function returns RECORD and hasn't
+ 		 * got a predetermined record type, and is prohibited otherwise.
+ 		 */
+-		if (coldeflist != NIL)
++		if (coldeflist != NIL || coldef_subquery != NULL)
+ 		{
+ 			if (functypclass != TYPEFUNC_RECORD)
+ 				ereport(ERROR,
+@@ -1492,7 +1494,71 @@
+ 							   -1,
+ 							   0);
+ 		}
+-		else if (functypclass == TYPEFUNC_RECORD)
++		else if (functypclass == TYPEFUNC_RECORD && coldef_subquery != NULL)
++			{
++				/* Use the column definition sub-query to form the alias list and
++				 * funccoltypes/funccoltypmods/funccolcollations lists */
++				ListCell   *tl;
++				ParseState *sub_pstate;
++				Query		*query;
++
++				if (!IsA(coldef_subquery, SelectStmt))
++					ereport(ERROR,
++							(errcode(ERRCODE_INVALID_TABLE_DEFINITION),
++							 errmsg("Only SELECT query can be used to define columns of a function "),
++							 parser_errposition(pstate, exprLocation(funcexpr))));
++
++				sub_pstate = make_parsestate(NULL);
++				query = transformTopLevelStmt(sub_pstate, coldef_subquery);
++				free_parsestate(sub_pstate);
++
++				Assert(query->commandType == CMD_SELECT);
++
++				/*
++				 * Use the column definition list to construct a tupdesc and fill
++				 * in the RangeTblFunction's lists.
++				 */
++				tupdesc = CreateTemplateTupleDesc(list_length(query->targetList), false);
++
++				// When the parsing is done, build a respective column description
++				i = 1;
++				foreach(tl, query->targetList)
++				{
++					TargetEntry * te = (TargetEntry *) lfirst(tl);
++					char	   *attrname;
++					Oid			attrtype;
++					int32		attrtypmod;
++					Oid			attrcollation;
++
++					if (te->resjunk) continue;
++
++					attrname = pstrdup(te->resname);
++					attrtype = exprType((Node *) te->expr);
++					attrtypmod = exprTypmod((Node *) te->expr);
++					attrcollation = exprCollation((Node *) te->expr);
++
++					TupleDescInitEntry(tupdesc, (AttrNumber) i, attrname,  attrtype, attrtypmod, 0);
++					TupleDescInitEntryCollation(tupdesc, (AttrNumber) i, attrcollation);
++
++					rtfunc->funccolnames = lappend(rtfunc->funccolnames, makeString(pstrdup(attrname)));
++					rtfunc->funccoltypes = lappend_oid(rtfunc->funccoltypes, attrtype);
++					rtfunc->funccoltypmods = lappend_int(rtfunc->funccoltypmods, attrtypmod);
++					rtfunc->funccolcollations = lappend_oid(rtfunc->funccolcollations, attrcollation);
++
++					i++;
++				}
++
++				/* Apply only for the 1st function */
++			coldef_subquery = NULL;
++			pfree(query);
++
++			/*
++			 * Ensure that the coldeflist defines a legal set of names (no
++			 * duplicates) and datatypes (no pseudo-types, for instance).
++			 */
++			CheckAttributeNamesTypes(tupdesc, RELKIND_COMPOSITE_TYPE, false);
++		}
++		else if (functypclass == TYPEFUNC_RECORD && coldef_subquery == NULL)
+ 		{
+ 			ListCell   *col;
+ 
+diff -ruN postgresql-9.6.0_org/src/backend/parser/scan.l postgresql-9.6.0/src/backend/parser/scan.l
+--- postgresql-9.6.0_org/src/backend/parser/scan.l	2016-09-26 22:26:58.000000000 +0200
++++ postgresql-9.6.0/src/backend/parser/scan.l	2016-10-21 10:50:33.000000000 +0200
+@@ -1026,6 +1026,32 @@
+ #undef yyleng
+ #define yyleng	(((struct yyguts_t *) yyscanner)->yyleng_r)
+ 
++/*
++ * scanner_str_from_scanbuf
++ *		Returns a pointer to a sub-string in scanbuf, given the "offset from" and "offset to" of a sub-string .
++ *
++ * Note that this can only be used for messages emitted during raw parsing
++ * (essentially, scan.l and gram.y), since it requires the yyscanner struct
++ * to still be available.
++ */
++char * scanner_str_from_scanbuf(int loc, int len, core_yyscan_t yyscanner)
++{
++	char * str; 
++
++	if (loc < 0 || len < 0)
++		return pstrdup("");
++	
++	if (loc + len >= yyextra->scanbuflen)
++		return pstrdup("");
++
++	/* Copy the substring */
++	str = (char *) palloc(len + 1);
++	memcpy(str, yyextra->scanbuf + loc, len);
++	str[len] = '\0';
++
++	return str;
++}
++
+ 
+ /*
+  * scanner_errposition
+diff -ruN postgresql-9.6.0_org/src/include/nodes/parsenodes.h postgresql-9.6.0/src/include/nodes/parsenodes.h
+--- postgresql-9.6.0_org/src/include/nodes/parsenodes.h	2016-09-26 22:26:58.000000000 +0200
++++ postgresql-9.6.0/src/include/nodes/parsenodes.h	2016-10-27 13:27:48.000000000 +0200
+@@ -543,6 +543,7 @@
+ 	Alias	   *alias;			/* table alias & optional column aliases */
+ 	List	   *coldeflist;		/* list of ColumnDef nodes to describe result
+ 								 * of function returning RECORD */
++	Node	   *coldef_subquery;/* the subquery to override description of a function, returning RECORD  */
+ } RangeFunction;
+ 
+ /*
+diff -ruN postgresql-9.6.0_org/src/include/parser/kwlist.h postgresql-9.6.0/src/include/parser/kwlist.h
+--- postgresql-9.6.0_org/src/include/parser/kwlist.h	2016-09-26 22:26:58.000000000 +0200
++++ postgresql-9.6.0/src/include/parser/kwlist.h	2016-10-27 13:33:44.000000000 +0200
+@@ -239,8 +239,10 @@
+ PG_KEYWORD("mapping", MAPPING, UNRESERVED_KEYWORD)
+ PG_KEYWORD("match", MATCH, UNRESERVED_KEYWORD)
+ PG_KEYWORD("materialized", MATERIALIZED, UNRESERVED_KEYWORD)
++PG_KEYWORD("maximize", MAXIMIZE, RESERVED_KEYWORD)
+ PG_KEYWORD("maxvalue", MAXVALUE, UNRESERVED_KEYWORD)
+ PG_KEYWORD("method", METHOD, UNRESERVED_KEYWORD)
++PG_KEYWORD("minimize", MINIMIZE, RESERVED_KEYWORD)
+ PG_KEYWORD("minute", MINUTE_P, UNRESERVED_KEYWORD)
+ PG_KEYWORD("minvalue", MINVALUE, UNRESERVED_KEYWORD)
+ PG_KEYWORD("mode", MODE, UNRESERVED_KEYWORD)
+@@ -357,6 +359,7 @@
+ PG_KEYWORD("skip", SKIP, UNRESERVED_KEYWORD)
+ PG_KEYWORD("smallint", SMALLINT, COL_NAME_KEYWORD)
+ PG_KEYWORD("snapshot", SNAPSHOT, UNRESERVED_KEYWORD)
++PG_KEYWORD("solveselect", SOLVESELECT, RESERVED_KEYWORD)
+ PG_KEYWORD("some", SOME, RESERVED_KEYWORD)
+ PG_KEYWORD("sql", SQL_P, UNRESERVED_KEYWORD)
+ PG_KEYWORD("stable", STABLE, UNRESERVED_KEYWORD)
+@@ -369,6 +372,7 @@
+ PG_KEYWORD("storage", STORAGE, UNRESERVED_KEYWORD)
+ PG_KEYWORD("strict", STRICT_P, UNRESERVED_KEYWORD)
+ PG_KEYWORD("strip", STRIP_P, UNRESERVED_KEYWORD)
++PG_KEYWORD("subjectto", SUBJECTTO, RESERVED_KEYWORD)
+ PG_KEYWORD("substring", SUBSTRING, COL_NAME_KEYWORD)
+ PG_KEYWORD("symmetric", SYMMETRIC, RESERVED_KEYWORD)
+ PG_KEYWORD("sysid", SYSID, UNRESERVED_KEYWORD)
+diff -ruN postgresql-9.6.0_org/src/include/parser/scanner.h postgresql-9.6.0/src/include/parser/scanner.h
+--- postgresql-9.6.0_org/src/include/parser/scanner.h	2016-09-26 22:26:58.000000000 +0200
++++ postgresql-9.6.0/src/include/parser/scanner.h	2016-10-27 13:30:05.000000000 +0200
+@@ -127,4 +127,8 @@
+ extern int	scanner_errposition(int location, core_yyscan_t yyscanner);
+ extern void scanner_yyerror(const char *message, core_yyscan_t yyscanner) pg_attribute_noreturn();
+ 
++/* Added to support of SOLVESELECT */
++extern char *	scanner_str_from_scanbuf(int loc, int len, core_yyscan_t yyscanner);
++
++
+ #endif   /* SCANNER_H */

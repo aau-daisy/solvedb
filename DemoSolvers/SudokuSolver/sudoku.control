@@ -1,0 +1,7 @@
+# Dedicated Sodoku Solver
+comment = 'Sudoku Solver for PostreSQL 9.2 (by Laurynas)'
+default_version = '1.0'
+module_pathname = '$libdir/sudokusolver'
+requires = 'solverapi'
+relocatable = false
+schema = public

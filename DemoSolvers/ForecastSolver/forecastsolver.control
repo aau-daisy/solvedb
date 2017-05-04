@@ -1,0 +1,7 @@
+# Dedicated Sodoku Solver
+comment = 'Time series forecasting solver for PostreSQL 9.6 (by Laurynas)'
+default_version = '1.1'
+module_pathname = '$libdir/solverfo'
+requires = 'solverapi'
+relocatable = false
+schema = public
