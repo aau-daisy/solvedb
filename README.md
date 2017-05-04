@@ -34,57 +34,53 @@ These instructions will get you a copy of the project up and running on your loc
 
 SolveDB can be installed by terminal with the scripts provided in the installation folder. The scripts will download the source code for
 - postgresql 9.6.0
--
+- glpk-4.47
+- SwarmOps1_2
+- RandomOps1_2
 
 and patch with the SolveDB additions.
 
 **Installation steps**
 Open the terminal at the SolveDB installation folder, and run the following commands
 ```
-./1_AssembleAll.sh
+$ ./1_AssembleAll.sh
+$ ./2_buildAll.sh
 ```
-Downloads and patches the source codes
-```
-./2_buildAll.sh
-```
-Installs the required libraries, and builds postgresql, SolveDB, and the included solvers.
+To download and patch the source code, install the required libraries, and build postgresql, SolveDB, and the included solvers. If the execution completes without error, all the components are installed correctly.
 
-If the installation is successful, the final output will be
-```
-
-```
 
 **Setup Postgresql server and user**
-To utilize postgresql, it is needed to create a user with privileges to the database folder. Open the terminal at the SolveDB installation folder:
+To utilize postgresql, it is needed to create a user with privileges to the database folder. In the example we create a *postgres* user.p
+Open the terminal at the SolveDB installation folder:
 
 ```
-adduser postgres
-mkdir /usr/local/pgsql/data
-chown postgres /usr/local/pgsql/data
+$ sudo adduser postgres
+$ sudo mkdir /usr/local/pgsql/data
+$ chown postgres /usr/local/pgsql/data
 ```
 
 
 Initialize postgtresql (only the first time OR if some errors are encountered. In this case, remove the content of /usr/local/pgsql/data and execute the following lines again)
 ```
-6 su - postgres
-7 /usr/local/pgsql/bin/initdb -D /usr/local/pgsql/data
+$ su - postgres
+$ /usr/local/pgsql/bin/initdb -D /usr/local/pgsql/data
 ```
 
 Start the postgresql server (to be done every time you restart the machine)
 
 ```
-/usr/local/pgsql/bin/postgres -D /usr/local/pgsql/data 
+$ /usr/local/pgsql/bin/postgres -D /usr/local/pgsql/data 
 ```
 
 **Install the included Solvers**
 The following instructions explain how to install the solvers for linear programming, mixed integer programming, and global black box optimization. From the terminal:
 
 ```
-su -s postgres
-psql
-CREATE EXTENSION solverapi;
-CREATE EXTENSION solverlp;
-CREATE EXTENSION solversw;
+$ su - postgres
+$ psql
+postgres=# CREATE EXTENSION solverapi;
+postgres=# CREATE EXTENSION solverlp;
+postgres=# CREATE EXTENSION solversw;
 ```
 If no error message is shown, the solvers are succesfully installed.
 
@@ -93,7 +89,7 @@ If no error message is shown, the solvers are succesfully installed.
 
 To utilize the system it is possible to use the default terminal-based postgresql interface. Alternatively, pgAdmin provides a graphical front-end for interfacing with postgresql. Any version of pgAdmin is compatible with SolveDB, however to have SolveDB syntax highlights in the pgAdmin SQL editor we suggest to compile pgAdmin3 from source. More information in the Section *Setup pgAdmin3 with solveDB* below.
 
-We provide an example of use with psql.
+We provide examples of SolveDB in the [DemoQueries](DemoQueries) folder.
 
 
 ### Setup pgAdmin3 with SolveDB
@@ -103,43 +99,43 @@ PgAdmin3 can be used as a GUI for postgresql/SolveDB. In the following, we provi
 Open the terminal in the SolveDB installation folder. 
 **pgAdmin, wxGTK, and requirements**
 ```
-wget https://ftp.postgresql.org/pub/pgadmin/pgadmin3/v1.20.0/src/pgadmin3-1.20.0.tar.gz
-wget https://sourceforge.net/projects/wxwindows/files/2.8.12/wxGTK-2.8.12.tar.gz/download
-sudo apt-get install libgtk2.0-dev unixodbc unixodbc-dev libpq-dev python-dev 
+$ wget https://ftp.postgresql.org/pub/pgadmin/pgadmin3/v1.20.0/src/pgadmin3-1.20.0.tar.gz
+$ wget https://sourceforge.net/projects/wxwindows/files/2.8.12/wxGTK-2.8.12.tar.gz/download
+$ sudo apt-get install libgtk2.0-dev unixodbc unixodbc-dev libpq-dev python-dev 
   libgtk-3-dev automake autoconf libxml2 libxml2-dev libxslt1.* libxslt1-dev python-sphinx
 ```
 **Install wxWidgets**
 ```
-cd wxGTK-2.8.12/
-./configure --with-gtk --enable-gtk2 --enable-unicode
-make
-sudo make install
-ldconfig
-cd contrib/
-make
-sudo make install
+$ cd wxGTK-2.8.12/
+$ ./configure --with-gtk --enable-gtk2 --enable-unicode
+$ make
+$ sudo make install
+$ ldconfig
+$ cd contrib/
+$ make
+$ sudo make install
 ```
 **Install pgAdmin3**
 ```
-cd ../../pgadmin*
-make clean
-autoreconf -f -i
-./configure
-mkdir parser
-cd parser 
-wget http://www.markmcfadden.net/files/kwlist.h 
-cd ../
-make all
-make install
+$ cd ../../pgadmin*
+$ make clean
+$ autoreconf -f -i
+$ ./configure
+$ mkdir parser
+$ cd parser 
+$ wget http://www.markmcfadden.net/files/kwlist.h 
+$ cd ../
+$ make all
+$ make install
 ```
 
 **Testing pgAdmin3**
 The executable file of pgAdmin3 is located in the folder *pgadmin3-1.20.0/pgadmin*, from there run from GUI or run
 ```
-./pgadmin3
+$ ./pgadmin3
 ```
 PgAdmin might give some compatibility warnings. However, none of these will affect the correct functioning of postgresql and solveDB. Just skip through them.
-To create a new database connection
+Create a new database connection, with some test parameters
 ```
 name: your_db_name
 host: localhost
@@ -158,15 +154,14 @@ To test if pgAdmin3 is correctly working, you can use the same examples we shown
 
 ## Contributing
 
-Please read [CONTRIBUTING.md](https://gist.github.com/PurpleBooth/b24679402957c63ec426) for details on our code of conduct, and the process for submitting pull requests to us.
+
 
 ## Versioning
 
-We use [SemVer](http://semver.org/) for versioning. For the versions available, see the [tags on this repository](https://github.com/your/project/tags). 
 
 ## Authors
 
-* **Laurynas Siksnys** - *Initial work* - [PurpleBooth](https://github.com/PurpleBooth)
+* **Laurynas Siksnys** - *Initial work* - 
 
 ## License
 
