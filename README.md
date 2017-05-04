@@ -1,9 +1,23 @@
-# SolveDB
-SolveDB: A PostgreSQL-based DBMS for optimization applications
+# SolveDB: A PostgreSQL-based DBMS for optimization applications
 
-# Project Title
+SolveDB is a Database Management Systems (DBMS) with the native support for *optimization*, *constraint satisfaction*, and *domain-specific* problems. 
+The current version of SolveDB is based on PostgreSQL 9.6 and it comes with a number of pre-installed solvers for linear programming (LP), mixed-integer programming (MIP), global black-box 
+optimization (GO), and domain-specific problems. 
 
-One Paragraph of project description goes here
+SolveDB aims at making database-based problem specification and solving much more *easy*, *user-friendly*, and *efficient*. To achieve these goals, SolveDB integrates solvers into 
+the DBMS backend, offers in-DBMS processing optimizations, and provides a common language for database queries, problem specification, and user-defined solvers.
+Users may specify and solve their problems using a single so-called solve query in the following intuitive SQL-based syntax:
+
+```
+  SOLVESELECT col_name [, ...] IN ( select_stmt ) [AS alias]
+       [ WITH col_name [, ...] IN ( select_stmt )  AS alias [, ...] ]
+[ MINIMIZE ( select_stmt ) [ MAXIMIZE ( select_stmt ) ] |
+  MAXIMIZE ( select_stmt ) [ MINIMIZE ( select_stmt ) ] ]
+[ SUBJECTTO ( select_stmt ) [, ...] ]
+[ USING solver_name [. ...] [( param[:= expr] [, ...] )] ]
+```
+
+More details can be found on our [Daisy Website](http://daisy.aau.dk/solvedb)
 
 ## Getting Started
 
@@ -81,11 +95,10 @@ See also the list of [contributors](https://github.com/your/project/contributors
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE.md](LICENSE.md) file for details
+This project is licensed under the Apache License - see the [LICENSE.md](LICENSE.md) file for details
 
 ## Acknowledgments
 
 * Hat tip to anyone who's code was used
 * Inspiration
 * etc
-
