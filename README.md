@@ -103,6 +103,8 @@ $ wget https://ftp.postgresql.org/pub/pgadmin/pgadmin3/v1.20.0/src/pgadmin3-1.20
 $ wget https://sourceforge.net/projects/wxwindows/files/2.8.12/wxGTK-2.8.12.tar.gz/download
 $ sudo apt-get install libgtk2.0-dev unixodbc unixodbc-dev libpq-dev python-dev 
   libgtk-3-dev automake autoconf libxml2 libxml2-dev libxslt1.* libxslt1-dev python-sphinx
+$ tar -xzf download
+$ tar -xzf pgadmin3-1.20.0.tar.gz
 ```
 **Install wxWidgets**
 ```
@@ -110,7 +112,7 @@ $ cd wxGTK-2.8.12/
 $ ./configure --with-gtk --enable-gtk2 --enable-unicode
 $ make
 $ sudo make install
-$ ldconfig
+$ sudo ldconfig
 $ cd contrib/
 $ make
 $ sudo make install
@@ -126,7 +128,7 @@ $ cd parser
 $ wget http://www.markmcfadden.net/files/kwlist.h 
 $ cd ../
 $ make all
-$ make install
+$ sudo make install
 ```
 
 **Testing pgAdmin3**
@@ -153,11 +155,11 @@ CREATE EXTENSION solversw;
 To test if pgAdmin3 is correctly working, you can use the same examples we shown in the previous section **_Running the Tests_**
 
 ## Contributing
-
+...
 
 
 ## Versioning
-
+...
 
 ## Authors
 
