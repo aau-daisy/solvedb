@@ -1,5 +1,5 @@
 -- Install data first
-﻿DROP TABLE IF EXISTS item;
+DROP TABLE IF EXISTS item;
 CREATE TABLE item (
 	item text PRIMARY KEY,
 	weight float8,
