@@ -1,5 +1,5 @@
 -- Install data first
-﻿DROP TABLE IF EXISTS sudoku;
+DROP TABLE IF EXISTS sudoku;
 CREATE TABLE sudoku (
   ID   INT ,
   COL  INT ,
