@@ -17,7 +17,7 @@ Problem specification examples and additional details can be found on [Daisy Web
 
 ## Getting Started
 
-Try-out SolveDB (with all its solvers) quickly by downloading this pre-configured [SolveDB Lubuntu Image](https://drive.google.com/file/d/0BztSwe5YpUt7aGliOWtUaFRlOHc/view), and then running it on [Virtual Box](https://www.virtualbox.org).
+Try-out SolveDB (with all its solvers) quickly by downloading this pre-configured [SolveDB Lubuntu Image](https://drive.google.com/uc?id=0BztSwe5YpUt7b1pjWUh3NXJZTnc&export=download), and then running it on [Virtual Box](https://www.virtualbox.org).
 
 Alternativelly, the instructions below explain how to get a copy of SolveDB (with all pre-installed solvers) up and running on your local machine from its source code.
 
