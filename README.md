@@ -17,7 +17,9 @@ Problem specification examples and additional details can be found on [Daisy Web
 
 ## Getting Started
 
-These instructions will get you a copy of SolveDB (with all pre-installed solvers) up and running on your local machine for development and testing purposes.
+Try-out SolveDB (with all its solvers) quickly by downloading this pre-configured [SolveDB Lubuntu Image](https://drive.google.com/file/d/0BztSwe5YpUt7aGliOWtUaFRlOHc/view), and then running it on [Virtual Box](https://www.virtualbox.org).
+
+Alternativelly, the instructions below explain how to get a copy of SolveDB (with all pre-installed solvers) up and running on your local machine from its source code.
 
 ### Prerequisites
 
@@ -38,7 +40,7 @@ The source code of these dependencies will be automatically patched with the Sol
 **Installation steps**
 Open the terminal at the SolveDB installation folder, and run the following commands
 ```
-$ ./1_AssembleAll.sh
+$ ./1_assembleAll.sh
 $ ./2_buildAll.sh
 ```
 These will download and patch the source code, install the required libraries, and build SolveDB and the included solvers. If the execution completes without error, all the components are installed correctly.
