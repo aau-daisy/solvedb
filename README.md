@@ -150,11 +150,12 @@ CREATE EXTENSION solversw;
 To test if pgAdmin3 is correctly working, you can use the same examples we shown in the previous section **_Running the Tests_**
 
 ## Contributing
-...
 
+Anyone is welcome to contribute to this SolveDB project. Please state all our changes (as required by Apache License Version 2.0) explicitly  in the attached CHANGELOG file.
 
 ## Versioning
-...
+
+*v2.0.0 - Initial GITHUB-compatible version was added.
 
 ## Authors
 
@@ -165,5 +166,5 @@ To test if pgAdmin3 is correctly working, you can use the same examples we shown
 ## License
 
 This project is licensed under the Apache License Version 2.0 - see the [LICENSE](LICENSE) file for details
-All SolveDB dependencies (PostgreSQL, GLPK, CBC, SwarmOPS) are distributed under their own terms and are not included into this repository.
+All SolveDB dependencies (PostgreSQL, GLPK, CBC, SwarmOPS) are distributed under their own terms and are not bundled with SolveDB (included into this repository).
 
