@@ -151,11 +151,11 @@ To test if pgAdmin3 is correctly working, you can use the same examples we shown
 
 ## Contributing
 
-Anyone is welcome to contribute to this SolveDB project. Please state all our changes (as required by Apache License Version 2.0) explicitly  in the attached CHANGELOG file.
+Anyone is welcome to contribute to this SolveDB project. Please state all our changes explicitly  in the attached CHANGELOG file.
 
 ## Versioning
 
-*v2.0.0 - Initial GITHUB-compatible version was added.
+* v2.0.0 - An initial GITHUB-compatible SolveDB version was added.
 
 ## Authors
 
