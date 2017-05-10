@@ -25,7 +25,7 @@ Alternativelly, the instructions below explain how to get a copy of SolveDB (wit
 
 - A Linux-based distribution, with Kernel 3.19 or higher (test on Ubuntu 14.04-16.04), with superuser permissions
 - Basic development tools: make, gcc, g++
-- 1GB of free space
+- 1GB of free disc space
 
 ### Installing
 
@@ -43,26 +43,24 @@ Open the terminal at the SolveDB installation folder, and run the following comm
 $ ./1_assembleAll.sh
 $ ./2_buildAll.sh
 ```
-These will download and patch the source code, install the required libraries, and build SolveDB and the included solvers. If the execution completes without error, all the components are installed correctly.
+These will download and patch the source code, install the required libraries, and build SolveDB and the included solvers. If the execution completes without an error, all the components are installed correctly.
 
 **Setup Postgresql server and user**
-To utilize SolveDB (PostgreSQL), it is needed to create a user with privileges to the database folder. In the example we create a *postgres* user. Open the terminal at the SolveDB installation folder:
+Running SolveDB (PostgreSQL) requires creating a user. In the example below, we create a *postgres* user and grant rights to access the standard database folder:
 
 ```
 $ sudo adduser postgres
 $ sudo mkdir /usr/local/pgsql/data
 $ chown postgres /usr/local/pgsql/data
 ```
-
-
-Initialize SolveDB (PostgreSQL) for the first time: 
+SolveDB (PostgreSQL) requires creating a new database cluster (only for the first time):
 ```
 $ su - postgres
 $ /usr/local/pgsql/bin/initdb -D /usr/local/pgsql/data
 ```
-If some errors are encountered, remove the content of /usr/local/pgsql/data and execute the commands again.
+If some errors are encountered, remove the content of /usr/local/pgsql/data, fix the problem, and execute the commands again.
 
-Start the SolveDB (PostgreSQL) server (to be done every time you restart the machine)
+SolveDB (PostgreSQL) server can be started using the following command (to be done every time you restart the machine):
 
 ```
 $ /usr/local/pgsql/bin/postgres -D /usr/local/pgsql/data 
@@ -78,15 +76,14 @@ postgres=# CREATE EXTENSION solverapi;
 postgres=# CREATE EXTENSION solverlp;
 postgres=# CREATE EXTENSION solversw;
 ```
-If no error message is shown, the solvers are succesfully installed.
+If no error message is shown, the solvers are succesfully installed. Note, other SolveDB solvers are installed analogously.
 
 
 ## Running the tests
 
-To utilize the system it is possible to use the default terminal-based PostgreSQL interface (psql). Alternatively, pgAdmin provides a graphical front-end for interfacing with SolveDB (PostgreSQL). Any version of pgAdmin is compatible with SolveDB, however to have SolveDB syntax highlights in the pgAdmin SQL editor we suggest to compile pgAdmin3 from source. More information in the Section *Setup pgAdmin3 with solveDB* below.
+We provide examples of SolveDB problems in the [DemoQueries](DemoQueries) folder, as well as a number of user-defined solvers in the [DemoSolvers](DemoSolvers) folder.
 
-We provide examples of SolveDB in the [DemoQueries](DemoQueries) folder.
-
+To solve these example problems as well as any other user-specified problems, it is possible to use the default terminal-based PostgreSQL interface (psql). Alternatively, pgAdmin provides a graphical front-end for interfacing with SolveDB (PostgreSQL). Any version of pgAdmin is compatible with SolveDB, however to have SolveDB syntax highlights in the pgAdmin SQL editor we suggest to compile pgAdmin3 from source. More information in the Section *Setup pgAdmin3 with solveDB* below.
 
 ### Setup pgAdmin3 with SolveDB
 PgAdmin3 can be used as a GUI for SolveDB (PostgreSQL). In the following, we provide instructions on how to compile pgAdmin3 on SolveDB, in order to enable SolveDB syntax highlighting in the graphical SQL editor. The compliation of pgAdmin on SolveDB requires the wxGTK-2.8.12 library (it has not been tested work with later versions). Other additional libraries are required.
