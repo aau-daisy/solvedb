@@ -164,6 +164,5 @@ Anyone is welcome to contribute to this SolveDB project. Please state all our ch
 
 ## License
 
-This project is licensed under the Apache License Version 2.0 - see the [LICENSE](LICENSE) file for details
-All SolveDB dependencies (PostgreSQL, GLPK, CBC, SwarmOPS) are distributed under their own terms and are not bundled with SolveDB (included into this repository).
+This project is licensed under the Apache License Version 2.0 - see the [LICENSE](LICENSE) file for details. All SolveDB dependencies (PostgreSQL, GLPK, CBC, SwarmOPS) are distributed under their own terms and are not bundled with SolveDB (instead, they are downloaded during the assembly phase).
 
