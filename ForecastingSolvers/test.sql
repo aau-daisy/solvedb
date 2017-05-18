@@ -1,5 +1,5 @@
-﻿drop function test_extraction(text, text);
-CREATE OR REPLACE FUNCTION test_extraction (target_column_name text, time_column_name text)
+﻿drop function test_extraction(text, text, text);
+CREATE OR REPLACE FUNCTION test_extraction (target_column_name text, time_column_name text, table_name text)
   RETURNS integer
 AS $$
 	import pandas as pd
@@ -10,6 +10,10 @@ AS $$
 	from sklearn.metrics import mean_squared_error
 	from math import sqrt
 
+
+	#startup operations
+	query = "select * from create_temporary_forecasting_table('watt', 'time_t', '2015-11-12 14:00:00', '2015-11-13 14:00:00', 'Test')"
+	plpy.execute(query)
 	rv = plpy.execute("SELECT * from Test");
 	training_time_column = [];
 	training_target_column = [];
@@ -23,7 +27,7 @@ AS $$
 			training_time_column.append(datetime_object);
 		else:
 			time_column_to_fill.append(datetime_object)
-			target_colum_to_fill.append(target_value)
+			target_column_to_fill.append(target_value)
 	
 	#split for cross validation
 	x_train = np.array(training_time_column[0:int(len(training_time_column) / float(100) * 90)])
@@ -41,7 +45,7 @@ AS $$
 	q_parameters = range(0,3)
 
 	lowest_RMSE = sys.float_info.max
-	best_parameters_set_rmse = None
+	best_parameters_set = {}
 	final_prediction = None
 
 	#find model by cross validation
@@ -66,24 +70,44 @@ AS $$
 						rmse += sqrt(mean_squared_error([predictions[i]], [y_test[i]]))
 						if rmse < lowest_RMSE:
 							lowest_RMSE = rmse
-							best_parameters_set_rmse = [time_window, p, d, q]
+							best_parameters_set = {"time_window":time_window, "p":p, "d":d, "q":q}
 							best_model = arima_res
 
 
-	# print the final prediction and the parameters of the model
+	# print the parameters of the model
 	print "-------rmse--------------------------------------------------------------------------------------"
-	print(best_parameters_set_rmse)
+	print(best_parameters_set)
 	print(lowest_RMSE)
-	print "target column length"
-	print len(target_column_to_fill)
+
+	# save the model on the model table
+	query = "create table if not exists predictive_solvers (id serial not null primary key, solver_type text not null, parameters json )"
+	plpy.execute(query)
+	query = "insert into predictive_solvers(solver_type, parameters) values ('ARIMA','{"
+	query += "\"time_window\":\"{time_window}\",\"p\":\"{p}\",\"d\":\"{d}\", \"q\":\"{q}\"".format(**best_parameters_set)
+	query += "}')"
+	print query
+	plpy.execute(query)
+
+
+	# write the prediction on the temporary table
+	temporary_table_name = "tmp_forecasting_table_" + table_name
+	query = "select * from " + temporary_table_name
+	rv = plpy.execute(query)
+	number_of_predictions = len(rv)
+	predictions = best_model.forecast(number_of_predictions)[0] 
+	for i in range(len(rv)):
+		query = "UPDATE " + temporary_table_name + " SET target='{target}' WHERE time_t = '{time_t}' and fill = True"
+		data = {"time_t":rv[i]['time_t'], "fill":rv[i]['fill'], "target":predictions[i]}
+		query = query.format(**data)
+		print query
+		plpy.execute(query)
+
+	
 	return 0
 
 $$ LANGUAGE plpythonu;
 
-select * from test_extraction('watt','time_t');
+select * from test_extraction('watt','time_t', 'Test');
 
-
-
-select * from Test
-
+select * from tmp_forecasting_table_Test order by time_t
 

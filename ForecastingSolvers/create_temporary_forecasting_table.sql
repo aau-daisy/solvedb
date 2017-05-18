@@ -13,12 +13,14 @@ AS $$
 
 
 	# find most probable interval between samples in time series
-	query = "select " + time_column_name + " - lag("+time_column_name+") over(order by " + time_column_name + ") as increase from Test order by " + time_column_name + " desc limit 1000"
+	query = "select " + time_column_name + " from " + table_name + " order by " + time_column_name + " desc limit 1000"
 	rv = plpy.execute(query)
 	time_intervals = {}
-	for line in rv:
-		time_object = datetime.strptime(line['increase'], '%H:%M:%S')
-		time_intervals[time_object.total_seconds()] = time_intervals.get(time_object.total_seconds(),0) + 1
+	for i in range(len(rv)-1):
+		time_object_a = datetime.strptime(rv[i][time_column_name], '%Y-%m-%d %H:%M:%S')
+		time_object_b = datetime.strptime(rv[i+1][time_column_name], '%Y-%m-%d %H:%M:%S')
+		print (time_object_a - time_object_b).total_seconds()
+		time_intervals[(time_object_a - time_object_b).total_seconds()] = time_intervals.get((time_object_a - time_object_b).total_seconds(),0) + 1
 	most_probable_interval = None
 	probability = 0
 	for key, value in time_intervals.iteritems():
@@ -27,40 +29,35 @@ AS $$
 			most_probable_interval = key
 
 	# create temporary table with rows to fill
-	query = "select " + time_column_name + ", " + value_column_name + " from Test where time_t > \'" + str(starting_datetime) + "\' and time_t < \'" + str(ending_datetime) + "\'"
+	query = "select " + time_column_name + ", " + target_column_name + " from " + table_name + " where " + time_column_name + " > \'" + str(starting_datetime) + "\' and " + time_column_name + " < \'" + str(ending_datetime) + "\'"
 	rv = plpy.execute(query)
 	lines_for_view = []
 	last_existing_line = starting_datetime
 	for line in rv:
 		last_existing_line = datetime.strptime(line[time_column_name], '%Y-%m-%d %H:%M:%S')
 		# if the value column is empty, mark as to_be_filled
-		if not line[1]:
-			lines_for_view.append([line[time_column_name], None, True])
+		if not line[target_column_name]:
+			lines_for_view.append({'time':line[time_column_name], 'value':'null','fill':True})
 		else:
-			lines_for_view.append([line[time_column_name], line[1], False])
+			lines_for_view.append({'time':line[time_column_name], 'value':line[target_column_name], 'fill':False})
 
 
 	number_of_rows_to_fill = int((ending_datetime - last_existing_line).total_seconds() / float(most_probable_interval))
 	for i in range(1, number_of_rows_to_fill+1):
-		lines_for_view.append([str(last_existing_line + timedelta(seconds=i * 3600)), None, True])
-
+		lines_for_view.append({'time':str(last_existing_line + timedelta(seconds=i * 3600)), 'value':'null', 'fill':True})
 
 	# write the temporary table on the db
 	tmp_table_name = "tmp_forecasting_table_" + table_name
 	query = "drop table if exists " + tmp_table_name
-	cur.execute(query)
+	plpy.execute(query)
 	query = "create table " + tmp_table_name + " (time_t TIMESTAMP, target NUMERIC, fill BOOLEAN)"
-	cur.execute(query)
+	plpy.execute(query)
 
-
-	args_str = ','.join(cur.mogrify("(%s, %s, %s)", x) for x in lines_for_view)
-	query = "INSERT INTO " + tmp_table_name + " VALUES " + args_str
-	cur.execute(query)
-
-	conn.commit()
-
-	cur.close()
-	conn.close()
+	query = "INSERT INTO " + tmp_table_name + " VALUES "
+	for data in lines_for_view:
+		query += "('{time}', {value}, {fill}),\n".format(**data)
+	print query
+	plpy.execute(query[:-2])
 
 	return 0
 
@@ -68,3 +65,5 @@ $$ LANGUAGE plpythonu;
 
 
 select * from create_temporary_forecasting_table('watt', 'time_t', '2015-11-12 14:00:00', '2015-11-13 14:00:00', 'Test');
+
+select * from tmp_forecasting_table_Test where fill = False
