@@ -96,7 +96,7 @@ Open the terminal in the SolveDB installation folder.
 $ wget https://ftp.postgresql.org/pub/pgadmin/pgadmin3/v1.20.0/src/pgadmin3-1.20.0.tar.gz
 $ wget https://sourceforge.net/projects/wxwindows/files/2.8.12/wxGTK-2.8.12.tar.gz/download
 $ sudo apt-get install libgtk2.0-dev unixodbc unixodbc-dev libpq-dev python-dev 
-  libgtk-3-dev automake autoconf libxml2 libxml2-dev libxslt1.* libxslt1-dev python-sphinx
+  libgtk-3-dev automake autoconf libxml2 libxml2-dev libxslt1.* libxslt1-dev python-sphinx libssl-dev
 $ tar -xzf download
 $ tar -xzf pgadmin3-1.20.0.tar.gz
 ```
@@ -114,7 +114,6 @@ $ sudo make install
 **Install pgAdmin3**
 ```
 $ cd ../../pgadmin*
-$ make clean
 $ autoreconf -f -i
 $ ./configure
 $ mkdir parser
