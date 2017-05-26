@@ -1,4 +1,4 @@
--- complain if script is sourced in psql, rather than via CREATE EXTENSION
+﻿-- complain if script is sourced in psql, rather than via CREATE EXTENSION
 \echo Use "CREATE EXTENSION solverapi" to load this file. \quit
 
 -- Adjust this setting to control where the objects get created. SET LOCAL search_path TO @extschema@;
@@ -11,7 +11,18 @@ CREATE TYPE sl_attribute_kind AS ENUM ('undefined',	-- An attribute kind is not 
 				       'id', 		-- This is an ID of an input relation
 				       'unknown', 	-- An attribute defines unknown variables
 				       'known'); 	-- An attribute defines known variables
-				       
+
+
+-- This defines the supported types for time series features
+CREATE TYPE sl_supported_time_types AS ENUM ('timestamp', 
+					'timestamp without time zone',
+					'timestamp with time zone',
+					'date',
+					'time',
+					'time with time zone',
+					'time without time zone');
+
+
 -- This type describes target attributes of a dynamic query
 DROP TYPE IF EXISTS sl_attribute_desc CASCADE;
 CREATE TYPE sl_attribute_desc AS
@@ -567,6 +578,36 @@ CREATE OR REPLACE FUNCTION sl_build_out_join(arg sl_solver_arg, base sl_viewsql_
 	    quote_ident(arg.tmp_id), quote_ident(join_id_col));
 $$ LANGUAGE SQL IMMUTABLE STRICT;
 
+-- TODO: debug version, documentation not complete
+-- [Join] Performs the generic version of the following function (used for prediction solvers)
+-- select * from (select * from table1) as r
+-- union all 
+-- select null as id, t2.time_t, t2.watt
+-- from tmp_forecasting_table_input_schema as t2
+-- left join Test as t1
+-- on
+-- t2.time_t = t1.time_t and
+-- t2.watt = t1.watt
+-- where t1.time_t is Null and t1.watt is Null;
+--drop function sl_build_union_right_join(sl_solver_arg, name, text, text[], text[]);
+CREATE OR REPLACE FUNCTION sl_build_union_right_join_debug(arg sl_solver_arg, not_joining_clmns name[], joining_clmns name[], sql text) 
+RETURNS sl_viewsql_out AS $$ 
+SELECT format('SELECT * FROM %s AS r UNION ALL SELECT %s, %s FROM %s AS q LEFT JOIN %s AS s ON %s WHERE %s',
+		arg.tmp_name,
+		(SELECT string_agg(format('null as %s',quote_ident(not_joining_clmns[i])), ',')
+ 		FROM generate_subscripts(not_joining_clmns, 1) AS i),
+ 		(SELECT string_agg(format('q.%s',quote_ident(joining_clmns[i])), ',')
+ 		FROM generate_subscripts(joining_clmns, 1) AS i),
+ 		sql,
+ 		arg.tmp_name,
+ 		(SELECT string_agg(format('q.%s = s.%s',quote_ident(joining_clmns[i]), 
+ 		quote_ident(joining_clmns[i])), ' AND ')
+ 		FROM generate_subscripts(joining_clmns, 1) AS i),
+ 		(SELECT string_agg(format('s.%s IS null',quote_ident(joining_clmns[i])), ' AND ')
+ 		FROM generate_subscripts(joining_clmns, 1) AS i));
+$$ LANGUAGE SQL IMMUTABLE STRICT;
+
+
 -- [Join Value] Build a view SQL where values in unknown-variable colums are substituted with values from a user defined query.
 -- The user defined query must have a variable number and value columns. 
 -- E.g., when "sql" represents relation Q with columns "var_nr", "values":
@@ -702,6 +743,14 @@ $$ LANGUAGE plpgsql VOLATILE STRICT;
 CREATE OR REPLACE FUNCTION sl_drop_view(viewname name) RETURNS boolean AS $$   
  BEGIN
    EXECUTE format('DROP VIEW %s', quote_ident(viewname));
+   RETURN TRUE;    
+ END;
+$$ LANGUAGE plpgsql VOLATILE STRICT;
+
+-- Drop a view with cascade, defined by viewname
+CREATE OR REPLACE FUNCTION sl_drop_view_cascade(viewname name) RETURNS boolean AS $$   
+ BEGIN
+   EXECUTE format('DROP VIEW %s CASCADE', quote_ident(viewname));
    RETURN TRUE;    
  END;
 $$ LANGUAGE plpgsql VOLATILE STRICT;
