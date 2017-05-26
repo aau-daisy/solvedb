@@ -1,6 +1,6 @@
-﻿drop function test_extraction(text, text, text);
-CREATE OR REPLACE FUNCTION test_extraction (target_column_name text, time_column_name text, table_name text)
-  RETURNS integer
+﻿drop function arima_prediction(text, text, text, text, text, text);
+CREATE OR REPLACE FUNCTION arima_prediction (target_column_name text, time_column_name text, table_name text, forecasting_table_name text, starting_time text, end_time text)
+  RETURNS boolean
 AS $$
 	import pandas as pd
 	import statsmodels.api as sm
@@ -9,11 +9,12 @@ AS $$
 	import sys
 	from sklearn.metrics import mean_squared_error
 	from math import sqrt
+	import math
 
 
 	#startup operations
-	query = "select * from create_temporary_forecasting_table('watt', 'time_t', '2015-11-12 14:00:00', '2015-11-13 14:00:00', 'Test')"
-	plpy.execute(query)
+	#query = "select * from create_temporary_forecasting_table('" + target_column_name+"', '"+time_column_name+"', '" + starting_time+ "', '"+end_time+"', '"+table_name+"')"
+	#plpy.execute(query)
 	rv = plpy.execute("SELECT * from Test");
 	training_time_column = [];
 	training_target_column = [];
@@ -53,7 +54,6 @@ AS $$
 	for time_window in time_window_parameters:
 		series = pd.Series(y_train[int(len(y_train) - (len(y_train) / float(100) * time_window)):len(y_train)],
                            x_train[int(len(x_train) - (len(x_train) / float(100) * time_window)):len(x_train)])
-                print series
 		for p in p_parameters:
 			for d in d_parameters:
 				for q in q_parameters:
@@ -63,6 +63,12 @@ AS $$
 						predictions = arima_res.forecast(len(y_test))[0]
 					except Exception as ex:
 						predictions = np.array(y_train[len(y_train) - len(y_test):len(y_train)])
+					#--check for predictions that are nan
+					for pr in range(len(predictions)):
+						if math.isnan(predictions[pr]):
+							predictions[pr] = np.mean(np.array(y_train[len(y_train) - len(y_test):len(y_train)]))
+					print "PREDICTIONS:-----"
+					print predictions
 					#Evaluate the predictions with RMSE
 					rmse = 0
 					print "start evaluation of " + str(p) + str(d) + str(q)
@@ -90,24 +96,31 @@ AS $$
 
 
 	# write the prediction on the temporary table
-	temporary_table_name = "tmp_forecasting_table_" + table_name
-	query = "select * from " + temporary_table_name
+	
+	query = "select * from " + forecasting_table_name
 	rv = plpy.execute(query)
 	number_of_predictions = len(rv)
 	predictions = best_model.forecast(number_of_predictions)[0] 
 	for i in range(len(rv)):
-		query = "UPDATE " + temporary_table_name + " SET target='{target}' WHERE time_t = '{time_t}' and fill = True"
+		query = "UPDATE " + forecasting_table_name + " SET " + target_column_name + "='{target}' WHERE "+ time_column_name + " = '{time_t}' and fill = True"
 		data = {"time_t":rv[i]['time_t'], "fill":rv[i]['fill'], "target":predictions[i]}
 		query = query.format(**data)
 		print query
 		plpy.execute(query)
 
-	
-	return 0
+	# join original table with forecasting
+	return True
 
 $$ LANGUAGE plpythonu;
 
-select * from test_extraction('watt','time_t', 'Test');
-
-select * from tmp_forecasting_table_Test order by time_t
-
+-- TESTING
+-- 
+-- select * from test_extraction('watt','time_t', 'Test', '2015-11-12 23:00:00', '2015-11-13 23:00:00');
+-- 
+-- select * from join_prediction_and_original_table('Test', 'tmp_forecasting_table_Test')
+-- 
+-- select * from final_data order by time_t
+-- 
+-- 
+-- select * from Test
+-- drop table final_data cascade

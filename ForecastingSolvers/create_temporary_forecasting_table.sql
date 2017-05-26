@@ -1,7 +1,7 @@
-﻿--drop function create_temporary_forecasting_table(text, text, text, text, text);
+﻿drop function create_temporary_forecasting_table(text, text, text, text, text);
 CREATE OR REPLACE FUNCTION create_temporary_forecasting_table(target_column_name text, 
 		time_column_name text, starting_time text, ending_time text, table_name text)
-  RETURNS integer
+  RETURNS text
 AS $$
 	from datetime import datetime
 	from datetime import timedelta
@@ -48,9 +48,9 @@ AS $$
 
 	# write the temporary table on the db
 	tmp_table_name = "tmp_forecasting_table_" + table_name
-	query = "drop table if exists " + tmp_table_name
+	query = "drop table if exists " + tmp_table_name + " cascade"
 	plpy.execute(query)
-	query = "create table " + tmp_table_name + " (time_t TIMESTAMP, target NUMERIC, fill BOOLEAN)"
+	query = "create table " + tmp_table_name + " (" + time_column_name  + " TIMESTAMP, " + target_column_name +   " NUMERIC, fill BOOLEAN)"
 	plpy.execute(query)
 
 	query = "INSERT INTO " + tmp_table_name + " VALUES "
@@ -59,11 +59,8 @@ AS $$
 	print query
 	plpy.execute(query[:-2])
 
-	return 0
+	return tmp_table_name;
+
 
 $$ LANGUAGE plpythonu;
 
-
-select * from create_temporary_forecasting_table('watt', 'time_t', '2015-11-12 14:00:00', '2015-11-13 14:00:00', 'Test');
-
-select * from tmp_forecasting_table_Test where fill = False
