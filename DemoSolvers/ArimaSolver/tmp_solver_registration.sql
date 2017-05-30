@@ -1,6 +1,5 @@
 ﻿-- complain if script is sourced in psql, rather than via CREATE EXTENSION
---\echo Use "CREATE EXTENSION python_test_solver" to load this file. \quit
---delete from sl_solver where name = 'python_test_solver'
+\echo Use "CREATE EXTENSION arima_solver" to load this file. \quit
 
 -- Registers the solver and 1 method.
 delete from sl_solver where name = 'arima_solver';

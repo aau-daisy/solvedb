@@ -22,6 +22,16 @@ CREATE TYPE sl_supported_time_types AS ENUM ('timestamp',
 					'time with time zone',
 					'time without time zone');
 
+-- This type defines the supported machine learning forecasting methods (no time series)
+drop type if exists sl_supported_ml_forecasting_methods;
+CREATE TYPE sl_supported_ml_forecasting_methods AS ENUM (
+		'linear_regression');
+
+-- This type defines the supported time series forecasting methods
+drop type if exists sl_supported_ts_forecasting_methods;
+CREATE TYPE sl_supported_ts_forecasting_methods AS ENUM (
+		'arima');
+
 
 -- This type describes target attributes of a dynamic query
 DROP TYPE IF EXISTS sl_attribute_desc CASCADE;
@@ -590,7 +600,7 @@ $$ LANGUAGE SQL IMMUTABLE STRICT;
 -- t2.watt = t1.watt
 -- where t1.time_t is Null and t1.watt is Null;
 --drop function sl_build_union_right_join(sl_solver_arg, name, text, text[], text[]);
-CREATE OR REPLACE FUNCTION sl_build_union_right_join_debug(arg sl_solver_arg, not_joining_clmns name[], joining_clmns name[], sql text) 
+CREATE OR REPLACE FUNCTION sl_build_out_union_right_join(arg sl_solver_arg, not_joining_clmns name[], joining_clmns name[], sql text) 
 RETURNS sl_viewsql_out AS $$ 
 SELECT format('SELECT * FROM %s AS r UNION ALL SELECT %s, %s FROM %s AS q LEFT JOIN %s AS s ON %s WHERE %s',
 		arg.tmp_name,
