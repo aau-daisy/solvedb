@@ -67,8 +67,6 @@ AS $$
 					for pr in range(len(predictions)):
 						if math.isnan(predictions[pr]):
 							predictions[pr] = np.mean(np.array(y_train[len(y_train) - len(y_test):len(y_train)]))
-					print "PREDICTIONS:-----"
-					print predictions
 					#Evaluate the predictions with RMSE
 					rmse = 0
 					print "start evaluation of " + str(p) + str(d) + str(q)
@@ -81,17 +79,12 @@ AS $$
 
 
 	# print the parameters of the model
-	print "-------rmse--------------------------------------------------------------------------------------"
-	print(best_parameters_set)
-	print(lowest_RMSE)
-
 	# save the model on the model table
 	query = "create table if not exists predictive_solvers (id serial not null primary key, solver_type text not null, parameters json )"
 	plpy.execute(query)
 	query = "insert into predictive_solvers(solver_type, parameters) values ('ARIMA','{"
 	query += "\"time_window\":\"{time_window}\",\"p\":\"{p}\",\"d\":\"{d}\", \"q\":\"{q}\"".format(**best_parameters_set)
 	query += "}')"
-	print query
 	plpy.execute(query)
 
 
@@ -105,22 +98,9 @@ AS $$
 		query = "UPDATE " + forecasting_table_name + " SET " + target_column_name + "='{target}' WHERE "+ time_column_name + " = '{time_t}' and fill = True"
 		data = {"time_t":rv[i]['time_t'], "fill":rv[i]['fill'], "target":predictions[i]}
 		query = query.format(**data)
-		print query
 		plpy.execute(query)
 
 	# join original table with forecasting
 	return True
 
 $$ LANGUAGE plpythonu;
-
--- TESTING
--- 
--- select * from test_extraction('watt','time_t', 'Test', '2015-11-12 23:00:00', '2015-11-13 23:00:00');
--- 
--- select * from join_prediction_and_original_table('Test', 'tmp_forecasting_table_Test')
--- 
--- select * from final_data order by time_t
--- 
--- 
--- select * from Test
--- drop table final_data cascade

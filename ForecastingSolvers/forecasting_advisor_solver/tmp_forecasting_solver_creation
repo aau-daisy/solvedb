@@ -1,0 +1,72 @@
+﻿-- complain if script is sourced in psql, rather than via CREATE EXTENSION
+--\echo Use "CREATE EXTENSION predictive_solver" to load this file. \quit
+
+-- Registers the solver and 1 method.
+delete from sl_solver where name = 'predictive_solver';
+
+
+WITH
+-- Registers the solver
+  solver AS   (INSERT INTO sl_solver(name, version, author_name, author_url, description)
+                 values ('predictive_solver', 1.0, 'Davide Frazzetto', 'http://vbn.aau.dk/en/persons/davide-frazzetto(448b0269-416f-4a18-80b8-ec6b6f0bdb71).html', 'Main Predictive solver advisor') 
+              returning sid),     
+
+-- Registers the BASIC method. It has no parameters.
+ method1 AS  (INSERT INTO sl_solver_method(sid, name, name_full, func_name, prob_name, description)
+                  SELECT sid, 'advisor', 'default predictive solver', 'predictive_solver_advisor', 'predictive problem', 'Manages the generic prediction tasks' 
+		  FROM solver RETURNING mid),
+
+-- Register arima methods.
+ method2 AS  (INSERT INTO sl_solver_method(sid, name, name_full, func_name, prob_name, description)
+                  SELECT sid, 'arima', 'arima predictive solver', 'arima_solver', 'predictive problem', 'Solver for ARIMA forecasting model' 
+		  FROM solver RETURNING mid),	
+
+-- Register feature selector solver
+ method3 AS  (INSERT INTO sl_solver_method(sid, name, name_full, func_name, prob_name, description)
+                  SELECT sid, 'feature_selector', 'feature selection solver', 'f_selector_solver', 'predictive problem', 'Solver for feature selection' 
+		  FROM solver RETURNING mid),
+
+-- Register the parameters
+
+     spar2 AS    (INSERT INTO sl_parameter(name, type, description, value_default, value_min, value_max)
+                  values ('start_time' , 'text', 'starting_time', null, null, null) 
+                  RETURNING pid),
+     sspar2 AS   (INSERT INTO sl_solver_param(sid, pid)
+                  SELECT sid, pid FROM solver, spar2
+                  RETURNING sid),
+     spar3 AS    (INSERT INTO sl_parameter(name, type, description, value_default, value_min, value_max)
+                  values ('end_time' , 'text', 'ending_time', null, null, null) 
+                  RETURNING pid),
+     sspar3 AS   (INSERT INTO sl_solver_param(sid, pid)
+                  SELECT sid, pid FROM solver, spar3
+                  RETURNING sid),
+     spar5 AS    (INSERT INTO sl_parameter(name, type, description, value_default, value_min, value_max)
+                  values ('frequency' , 'text', 'prediction frequency', null, null, null) 
+                  RETURNING pid),
+     sspar5 AS   (INSERT INTO sl_solver_param(sid, pid)
+                  SELECT sid, pid FROM solver, spar5
+                  RETURNING sid),
+     spar7 AS    (INSERT INTO sl_parameter(name, type, description, value_default, value_min, value_max)
+                  values ('features' , 'text', 'feature columns to use', null, null, null) 
+                  RETURNING pid),
+     sspar7 AS   (INSERT INTO sl_solver_param(sid, pid)
+                  SELECT sid, pid FROM solver, spar7
+                  RETURNING sid),     
+     spar8 AS    (INSERT INTO sl_parameter(name, type, description, value_default, value_min, value_max)
+                  values ('methods' , 'text', 'prediction methods to test', null, null, null) 
+                  RETURNING pid),
+     sspar8 AS   (INSERT INTO sl_solver_param(sid, pid)
+                  SELECT sid, pid FROM solver, spar8
+                  RETURNING sid)  
+
+-- Perform the actual insert
+SELECT count(*) FROM solver, method1, method2, method3, spar2, sspar2, spar3, sspar3, spar5, sspar5, spar6, sspar6, spar7, sspar7, spar8, sspar8;
+
+-- Set the default method
+UPDATE sl_solver s
+SET default_method_id = mid
+FROM sl_solver_method m
+WHERE (s.sid = m.sid) AND (s.name = 'predictive_solver') AND (m.name='advisor');
+
+
+-------- old generation

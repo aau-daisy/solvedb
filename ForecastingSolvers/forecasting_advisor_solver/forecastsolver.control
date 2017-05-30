@@ -1,0 +1,7 @@
+# Main predictive advisor Solver
+comment = 'Generic prediction solver manager for PostreSQL 9.6 (by Davide)'
+default_version = '1.0'
+module_pathname = '$libdir/predictive_solver'
+requires = 'solverapi, plpythonu'
+relocatable = false
+schema = public
