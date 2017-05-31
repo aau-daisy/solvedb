@@ -22,16 +22,6 @@ CREATE TYPE sl_supported_time_types AS ENUM ('timestamp',
 					'time with time zone',
 					'time without time zone');
 
--- This type defines the supported machine learning forecasting methods (no time series)
-drop type if exists sl_supported_ml_forecasting_methods;
-CREATE TYPE sl_supported_ml_forecasting_methods AS ENUM (
-		'linear_regression');
-
--- This type defines the supported time series forecasting methods
-drop type if exists sl_supported_ts_forecasting_methods;
-CREATE TYPE sl_supported_ts_forecasting_methods AS ENUM (
-		'arima');
-
 
 -- This type describes target attributes of a dynamic query
 DROP TYPE IF EXISTS sl_attribute_desc CASCADE;
@@ -315,6 +305,7 @@ CREATE OR REPLACE FUNCTION sl_create_paramview(arg sl_solver_arg, viewname name)
    RETURN TRUE;
  END   
 $$ LANGUAGE plpgsql VOLATILE STRICT;
+
 
 -- **************** All sorts of dynamic query (ViewSQL) generating/manipulation functions ********************************
 
