@@ -60,7 +60,7 @@ WITH
                   RETURNING sid)  
 
 -- Perform the actual insert
-SELECT count(*) FROM solver, method1, method2, method3, spar2, sspar2, spar3, sspar3, spar5, sspar5, spar6, sspar6, spar7, sspar7, spar8, sspar8;
+SELECT count(*) FROM solver, method1, method2, method3, spar2, sspar2, spar3, sspar3, spar5, sspar5, spar7, sspar7, spar8, sspar8;
 
 -- Set the default method
 UPDATE sl_solver s

@@ -1,5 +1,5 @@
-﻿drop function arima_prediction(text, text, text, text, text, text);
-CREATE OR REPLACE FUNCTION arima_prediction (target_column_name text, time_column_name text, table_name text, forecasting_table_name text, starting_time text, end_time text)
+﻿drop function if exists arima_fit_python_function(text, text, text, text, text, text);
+CREATE OR REPLACE FUNCTION arima_fit_python_function (target_column_name text, time_column_name text, table_name text, forecasting_table_name text, starting_time text, end_time text)
   RETURNS boolean
 AS $$
 	import pandas as pd
@@ -72,10 +72,10 @@ AS $$
 					print "start evaluation of " + str(p) + str(d) + str(q)
 					for i in range(len(predictions)):
 						rmse += sqrt(mean_squared_error([predictions[i]], [y_test[i]]))
-						if rmse < lowest_RMSE:
-							lowest_RMSE = rmse
-							best_parameters_set = {"time_window":time_window, "p":p, "d":d, "q":q}
-							best_model = arima_res
+					if rmse < lowest_RMSE:
+						lowest_RMSE = rmse
+						best_parameters_set = {"time_window":time_window, "p":p, "d":d, "q":q}
+						best_model = arima_res
 
 
 	# print the parameters of the model

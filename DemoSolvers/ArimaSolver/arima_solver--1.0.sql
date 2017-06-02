@@ -1,66 +1,54 @@
-﻿-- Install the solver method
-CREATE OR REPLACE FUNCTION forecasting_test_solve_default(arg sl_solver_arg) RETURNS setof record AS $$
-DECLARE
-     foundAttVid	boolean = false;-- Was the "vid" attribute found?
-     foundAttIs_int	boolean = false;-- Was the "is_int" attribute found?
-     foundAttObj_value	boolean = false;-- Was the "obj_value" attribute found?
-     foundAttMin_value	boolean = false;-- Was the "min_value" attribute found?
-     foundAttMax_value	boolean = false;-- Was the "max_value" attribute found?
-     foundAttValue	boolean = false;-- Was the "value" attribute found?
-     foundRelCtrM       boolean = false;-- Was the constraint relation specified?
-     foundRelCtrD       boolean = false;-- Was the constraint relation 2 specified?
-     foundTargetValue   boolean = false;-- Was the prediction target specified?
-     i		        int;		-- Index   
-     input_clmns  record;
-     input_feature_col_names  name[] :=  '{}';
-     input_feature_col_types  text[] :=  '{}';
-     input_time_col_names  name[] :=  '{}';
-     input_time_col_types  text[] :=  '{}';
-     -- currently handles a single target column
-     target_column_name name;
-     target_column_type text;
-     test_joining_columns name[] := '{}';
-     test_not_joining_columns name[] := '{}';
-     t       sl_attribute_desc;
-     v_o     sl_viewsql_out;
-     v_d     sl_viewsql_dst;     
-     tmp_forecasting_table_name text;
-  BEGIN       
-
-       
-
-     -- Check if the arguments and table format are correct
-     --foundTargetValue  = 
-     --COALESCE((SELECT count(*)=1 FROM sl_get_attributes(arg) WHERE att_name = sl_param_get_as_text(arg, 'target')), false); 
-	--TODO
-
-        PERFORM sl_create_view(sl_build_out(arg), 'input_relation');
-        PERFORM f_selector(arg, 'select * from input_relation limit 1');
-        return query execute sl_return(arg, sl_build_out(arg), 'input_relation');
+﻿-- wrapper for the fit function
+-- training_data/test_data: 	sql views
+DROP FUNCTION IF EXISTS arima_fit();
+CREATE OR REPLACE FUNCTION arima_fit (time_window int, p int, d int, q int, time_column_name text, target_column_name text, training_data text, test_data text)
+RETURNS NUMERIC
+AS $$
+	training_time	= []
+	training_target	= []
+	test_time	= []
+	test_target	= []
 	
-	
--- 	-- create temporary view input_schema containing the time column and the target value, and the rows to predcit
---  	execute 'create or replace view input_schema as select ' || input_time_col_names[0] || ', ' || target_column_name || ' from input_relation';
--- 	tmp_forecasting_table_name := create_temporary_forecasting_table(target_column_name, input_time_col_names[0], sl_param_get_as_text(arg, 'start_time'), sl_param_get_as_text(arg, 'end_time'), 'input_schema');
--- -- 	fill rows with prediction, and join with original table
---  	perform arima_prediction(target_column_name, input_time_col_names[0], 'input_schema', tmp_forecasting_table_name, sl_param_get_as_text(arg, 'start_time'), sl_param_get_as_text(arg, 'end_time'));
--- 
--- 	-- create array of columns to join (in the default case only time feature and target feature)
--- 	test_joining_columns := input_time_col_names || target_column_name;
--- 	for input_clmns in select att_name from  sl_get_attributes(arg) LOOP
--- 		IF (SELECT input_clmns.att_name = ANY (test_joining_columns)) THEN
--- 			null;
--- 		else
--- 			test_not_joining_columns := test_not_joining_columns || input_clmns.att_name;
--- 		END IF;
--- 	end loop;
--- 
---          RETURN QUERY EXECUTE sl_return(arg, sl_build_union_right_join_debug(arg, test_not_joining_columns, test_joining_columns, tmp_forecasting_table_name));
---         -- raise notice '---- %', input_clmns;
---         perform sl_drop_view_cascade('input_relation');
-     
-  END;
-$$ LANGUAGE plpgsql VOLATILE STRICT;
+	rv = plpy.execute(training_data)
+	for x in rv:
+		training_target.append(target_value)
+		training_time_column.append(datetime.strptime(x[time_column_name], '%Y-%m-%d %H:%M:%S'));
 
-solveselect * in (select * from Test) 
-using arima_solver(target:='watt',start_time:='2015-11-11 23:00:00', end_time:='2015-11-13 23:00:00');
+	rv = plpy.execute(test_data)
+	for x in rv:
+		test_time.append(datetime.strptime(x[time_column_name], '%Y-%m-%d %H:%M:%S'))
+		test_target.append(x[target_column_name])
+		
+
+	
+	x_train = np.array(training_time)
+	x_test = np.array(test_time)
+	y_train = np.array(training_target)
+	y_test = np.array(test_target)
+
+	series = pd.Series(y_train[int(len(y_train) - (len(y_train) / float(100) * time_window)):len(y_train)],
+                           x_train[int(len(x_train) - (len(x_train) / float(100) * time_window)):len(x_train)])
+
+	arima_mod = sm.tsa.ARIMA(series.astype(float), order=(p,d,q))
+	try:
+		arima_res = arima_mod.fit()
+		predictions = arima_res.forecast(len(y_test))[0]
+	except Exception as ex:
+		predictions = np.array(y_train[len(y_train) - len(y_test):len(y_train)])
+	#--check for predictions that are nan
+	for pr in range(len(predictions)):
+		if math.isnan(predictions[pr]):
+			predictions[pr] = np.mean(np.array(y_train[len(y_train) - len(y_test):len(y_train)]))
+
+
+	-- this needs to return
+
+
+
+
+
+
+
+
+
+$$ LANGUAGE plpythonu;
