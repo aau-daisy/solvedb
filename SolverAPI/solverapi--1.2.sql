@@ -999,9 +999,11 @@ CREATE OR REPLACE FUNCTION sl_inline_CTE_problems(problem sl_problem) RETURNS sl
 		END LOOP;
 		
 		-- Finally, add the CTE for the input relation projection
-		new_ctes = array_append(new_ctes, ROW(format('SELECT %s FROM %s', 
+		new_ctes = array_append(new_ctes, ROW(format('SELECT * FROM %s', (cte_prefix || sub_problem.input_alias)), inline.input_alias, ARRAY[]::name[])::sl_CTE_relation);
+					
+		/* new_ctes = array_append(new_ctes, ROW(format('SELECT %s FROM %s', 
 					(SELECT string_agg(col, ',') FROM unnest(inline.cols_unknown) AS col),  -- Unknown attribute list
-					(cte_prefix || sub_problem.input_alias)), inline.input_alias, ARRAY[]::name[])::sl_CTE_relation);
+					(cte_prefix || sub_problem.input_alias)), inline.input_alias, ARRAY[]::name[])::sl_CTE_relation);*/
 
 		-- Now, patch and add the constraints
 		-- Generate the relation renaming query
