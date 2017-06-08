@@ -1010,10 +1010,10 @@ CREATE OR REPLACE FUNCTION sl_inline_CTE_problems(problem sl_problem) RETURNS sl
 		pre_query = (SELECT format('WITH %s AS (SELECT * FROM %s)%s', quote_ident(sub_problem.input_alias), quote_ident(cte_prefix || sub_problem.input_alias),
 			    (SELECT string_agg(format(', %s AS (SELECT * FROM %s)', quote_ident(c.input_alias), quote_ident(cte_prefix || c.input_alias)), '') 
 			     FROM unnest(sub_problem.ctes) as c ))::text);
-		
-		SELECT array_agg(format('%s SELECT * FROM (%s) AS s', pre_query, ctr)) 
-		INTO new_ctrs
-		FROM unnest(sub_problem.ctr_sql) AS c(ctr);
+
+		/* Appends new contraints */
+		new_ctrs = array_cat(new_ctrs, (SELECT array_agg(format('%s SELECT * FROM (%s) AS s', pre_query, ctr))
+					        FROM unnest(sub_problem.ctr_sql) AS c(ctr)));
 		
 	END IF;	
    END LOOP; 
