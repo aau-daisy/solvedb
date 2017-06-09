@@ -30,8 +30,8 @@ DECLARE
 	k			int = 10;
 	kCrossTestViews 	text[] := '{}';
 	kCrossTrainingViews 	text[] := '{}';
-	ts_training		text := sl_get_unique_tblname() || '_pr_ts_training';
-	ts_test			text := sl_get_unique_tblname() || '_pr_ts_test';
+-- 	ts_training		text := sl_get_unique_tblname() || '_pr_ts_training';
+-- 	ts_test			text := sl_get_unique_tblname() || '_pr_ts_test';
 	tsSplitQuery		text;
 	input_length		int;
 	ts_features		text[] := '{}';
@@ -50,17 +50,18 @@ DECLARE
 	training_data_query 	text;
 	test_data_query		text;
 	tmp_record		record;
-	results_table		text := sl_get_unique_tblname() || '_pr_results';
-	parameter_array		text[] := '{}';
-	p_values_array		text[] := '{}';
+	results_table		text := sl_build_pr_results_table();
+	chosen_method		text;
 
 	-- for testing only
 	model_parameter_name	text[];
-	model_parameter_value	numeric[];
-	model_parameter_low	numeric[];
-	model_parameter_high	numeric[];
+	model_parameter_value	numeric;
+	model_parameter_low	numeric;
+	model_parameter_high	numeric;
 	model_parameter_type	text[];
-
+	model_parameter_accepted_values numeric[];
+	tmp_jsonb		jsonb;
+	predictions		numeric[];
 	model_fit_result	numeric[];
      
 BEGIN       
@@ -132,49 +133,49 @@ BEGIN
 		end if;		
 	 end loop;
 
-	IF test_ts_methods THEN
-		-- check time arguments (if time columns are present in the table)
-		 if array_length(input_time_col_names,1) = 0 THEN
-			RAISE EXCEPTION 'No time columns present in the given Table. Impossible to process time series.';
-		 END IF;
-
-		IF attStartTime IS NOT NULL THEN
-			attStartTime = convert_date_string(attStartTime);
-			IF attStartTime IS NULL THEN
-				RAISE EXCEPTION 'Given START TIME is not a recognizable time format, or the date is incorrect.';
-			END IF;
-		END IF;
-		IF attEndTime IS NOT NULL THEN
-			attEndTime = convert_date_string(attEndTime);
-			IF attEndTime IS NULL THEN
-				RAISE EXCEPTION 'Given END TIME is not a recognizable time format, or the date is incorrect.';
-			END IF;
-		END IF;
-
- 		BEGIN
-			IF attFrequency IS NOT NULL THEN
-				timeFrequency := attFrequency::int; 
-			ELSE	
-				timeFrequency := -1;
-			END IF;
-			tmp_string := 'select ' || target_column_name || ' from ' || input_table_tmp_name || ' where ' || target_column_name || ' is not null limit 1';
-			execute tmp_string into tmp_numeric;
-		EXCEPTION
-			WHEN SQLSTATE '22P02' THEN
-				RAISE EXCEPTION 'Impossible to parse given argument/s';
-		END;
-		
-		IF (attStartTime IS NOT NULL AND attEndTime IS NULL) OR (attStartTime IS NULL AND attEndTime IS NOT NULL) THEN
-			RAISE EXCEPTION 'Prediction time interval needs to be defined with <start,end> as 
-				start_time:="your_start_time", end_time:="your_end_time"';
-		END IF;
-
-		IF (attStartTime IS NOT NULL AND attEndTime IS NOT NULL) AND attStartTime > attEndTime THEN
-			RAISE EXCEPTION 'Error in given time interval: start_time > end_time.';
-		END IF;
-
-		
-	END IF;
+-- 	IF test_ts_methods THEN
+-- 		-- check time arguments (if time columns are present in the table)
+-- 		 if array_length(input_time_col_names,1) = 0 THEN
+-- 			RAISE EXCEPTION 'No time columns present in the given Table. Impossible to process time series.';
+-- 		 END IF;
+-- 
+-- 		IF attStartTime IS NOT NULL THEN
+-- 			attStartTime = convert_date_string(attStartTime);
+-- 			IF attStartTime IS NULL THEN
+-- 				RAISE EXCEPTION 'Given START TIME is not a recognizable time format, or the date is incorrect.';
+-- 			END IF;
+-- 		END IF;
+-- 		IF attEndTime IS NOT NULL THEN
+-- 			attEndTime = convert_date_string(attEndTime);
+-- 			IF attEndTime IS NULL THEN
+-- 				RAISE EXCEPTION 'Given END TIME is not a recognizable time format, or the date is incorrect.';
+-- 			END IF;
+-- 		END IF;
+-- 
+--  		BEGIN
+-- 			IF attFrequency IS NOT NULL THEN
+-- 				timeFrequency := attFrequency::int; 
+-- 			ELSE	
+-- 				timeFrequency := -1;
+-- 			END IF;
+-- 			tmp_string := 'select ' || target_column_name || ' from ' || input_table_tmp_name || ' where ' || target_column_name || ' is not null limit 1';
+-- 			execute tmp_string into tmp_numeric;
+-- 		EXCEPTION
+-- 			WHEN SQLSTATE '22P02' THEN
+-- 				RAISE EXCEPTION 'Impossible to parse given argument/s';
+-- 		END;
+-- 		
+-- 		IF (attStartTime IS NOT NULL AND attEndTime IS NULL) OR (attStartTime IS NULL AND attEndTime IS NOT NULL) THEN
+-- 			RAISE EXCEPTION 'Prediction time interval needs to be defined with <start,end> as 
+-- 				start_time:="your_start_time", end_time:="your_end_time"';
+-- 		END IF;
+-- 
+-- 		IF (attStartTime IS NOT NULL AND attEndTime IS NOT NULL) AND attStartTime > attEndTime THEN
+-- 			RAISE EXCEPTION 'Error in given time interval: start_time > end_time.';
+-- 		END IF;
+-- 
+-- 		
+-- 	END IF;
 
 	 -- set the user defined features (if found)
 	IF attFeatures IS NULL THEN
@@ -199,8 +200,7 @@ BEGIN
 		end if;
 	END IF;
 
-	raise notice 'split for ml';
-	 -- split into training data (with filled target column) and target data (with empty target column/given time range)
+	-- split into training data (with filled target column) and target data (with empty target column/given time range)
 	-- separate traning data from target data (for ml methods)
 	tmp_string_array := final_ml_features;
 	tmp_string_array := tmp_string_array ||  arg.tmp_id::text;
@@ -217,35 +217,22 @@ BEGIN
 		END IF;
 	END IF;
 
-	raise notice 'separate for time series';
-	tmp_string_array := '{}';
-	tmp_string_array := tmp_string_array || final_ts_features[0];
-	tmp_string_array := tmp_string_array || arg.tmp_id::text || target_column_name::text;
-	-- separate training data from target data (for time series)
-	IF test_ts_methods THEN
-		ts_target_table := separate_input_relation_on_time_range(target_column_name, arg.tmp_id, final_ts_features[0], timeFrequency,
-				input_table_tmp_name, attStartTime, attEndTime);
-		IF ts_target_table is null THEN 
-			RAISE EXCEPTION 'No rows to fill in the given Table. Model training/saving not yet implemented.';
-		END IF;
-		
-		execute 'SELECT COUNT(*) FROM ' || ts_target_table into input_length;
-		raise notice 'the table % is %', ts_target_table, input_length;
-
-		ts_training_table := sl_build_view_except_from_sql(input_table_tmp_name, ts_target_table, arg.tmp_id, tmp_string_array);
-		IF ts_training_table is null THEN
-			RAISE EXCEPTION 'No rows for training in the given Table. All rows have null values for the specified target.';
-		END IF;
-
-
-		raise notice 'jo I am back';
-
-
-		execute 'SELECT COUNT(*) FROM ' || ts_training_table into input_length;
-
-
-		raise notice 'the table % is %', ts_training_table, input_length;
-	END IF;
+-- 	tmp_string_array := '{}';
+-- 	tmp_string_array := tmp_string_array || final_ts_features[0];
+-- 	tmp_string_array := tmp_string_array || arg.tmp_id::text || target_column_name::text;
+-- 	-- separate training data from target data (for time series)
+-- 	IF test_ts_methods THEN
+-- 		ts_target_table := separate_input_relation_on_time_range(target_column_name, arg.tmp_id, final_ts_features[0], timeFrequency,
+-- 				input_table_tmp_name, attStartTime, attEndTime);
+-- 		IF ts_target_table is null THEN 
+-- 			RAISE EXCEPTION 'No rows to fill in the given Table. Model training/saving not yet implemented.';
+-- 		END IF;
+-- 
+-- 		ts_training_table := sl_build_view_except_from_sql(input_table_tmp_name, ts_target_table, arg.tmp_id, tmp_string_array);
+-- 		IF ts_training_table is null THEN
+-- 			RAISE EXCEPTION 'No rows for training in the given Table. All rows have null values for the specified target.';
+-- 		END IF;
+-- 	END IF;
 
 
 
@@ -283,26 +270,27 @@ BEGIN
 	END IF;
 
 	
-	-- TS METHODS: Create 70%-30% split on the training data
-	execute 'SELECT COUNT(*) FROM ' || ts_training_table into input_length;
-	IF test_ts_methods THEN
-		EXECUTE format('CREATE VIEW %s AS SELECT %s,%s FROM %s LIMIT %s',
-			ts_training,
-			input_time_col_names[0],
-			target_column_name,
-			ts_training_table,
-			((input_length/100) * 70)::int);
-		EXECUTE format('CREATE TABLE %s AS SELECT %s,%s FROM %s OFFSET %s',
-			ts_test,
-			input_time_col_names[0],
-			target_column_name,
-			ts_training_table,
-			((input_length/100) * 70)::int);
-	END IF;
+-- 	-- TS METHODS: Create 70%-30% split on the training data
+-- 	execute 'SELECT COUNT(*) FROM ' || ts_training_table into input_length;
+-- 	IF test_ts_methods THEN
+-- 		EXECUTE format('CREATE VIEW %s AS SELECT %s,%s FROM %s LIMIT %s',
+-- 			ts_training,
+-- 			input_time_col_names[0],
+-- 			target_column_name,
+-- 			ts_training_table,
+-- 			((input_length/100) * 70)::int);
+-- 		EXECUTE format('CREATE TABLE %s AS SELECT %s,%s FROM %s OFFSET %s',
+-- 			ts_test,
+-- 			input_time_col_names[0],
+-- 			target_column_name,
+-- 			ts_training_table,
+-- 			((input_length/100) * 70)::int);
+-- 	END IF;
 
-	-- create results table for containing the information on the ensamble forecasting methods
-	EXECUTE format('CREATE TEMP TABLE %s (sid SERIAL PRIMARY KEY, method text, parameters jsonb, result numeric)', results_table);
-	
+
+	perform sl_time_series_models_handler(arg, target_column_name, target_column_type, attStartTime, 
+		attEndTime, attFrequency, final_ts_features[0], input_table_tmp_name, 
+		results_table, ts_methods_to_test);
 ---------------------------------------- ////// END SETUP	---------------------------------------------------------
 
 	-- test only for each TS model to test, 
@@ -311,12 +299,14 @@ BEGIN
 		-- fill rows with prediction
 		-- join with original table
 
+		
+
 	training_data_query := format('SELECT * FROM %s', ts_training);
 	test_data_query := format('SELECT * FROM %s', ts_test);
 	FOREACH method SLICE 1 IN ARRAY ts_methods_to_test LOOP
 		raise notice 'fitting method: %', method[1];
 		-- get user defined parameter to test
-		for row_data in execute format('select * from sl_pr_model_parameters  where model_id in (select sid from sl_pr_models where name = ''%s'')', 'arima_stats_models')
+		for row_data in execute format('select * from sl_pr_model_parameters  where model_id in (select sid from sl_pr_models where model = ''%s'')', 'arima_stats_models')
 		LOOP
 			model_parameter_name    := model_parameter_name  ||	row_data.parameter;
 			model_parameter_value	:= model_parameter_value || 	row_data.value;
@@ -325,66 +315,62 @@ BEGIN
 			model_parameter_type	:= model_parameter_type  ||	row_data.type;
 		END LOOP;
 
- 		execute arima_handler(, input_time_col_names[0], target_column_name, training_data_query, test_data_query) into tmp_numeric;
+ 		perform arima_handler(results_table, input_time_col_names[0], target_column_name, training_data_query, test_data_query);
 	END LOOP;
 
-
-
--- 	
 -- 	look in the results table the model with the best result
 -- 	result table contains the followiing values [method text, parameters json, result numeric]
 --	find the best model method
- 	query = format('select method from %s where result is not null order by result desc limit 1', results_table)
-	execute query into tmp_string
+	execute format('select method from %s where result is not null order by result desc limit 1', results_table) into chosen_method;
 
-
-
-	query = format('select parameters from %s where result is not null order by result desc limit 1', results_table)
-	execute query into tmp_string
-	
-	-- iterate thogurh parameters
-	for i in select * from jsonb_each_text(tmp_string)
+	-- iterate through parameters
+	execute format('select parameters from %s where result is not null order by result desc limit 1', results_table) into tmp_jsonb;
+	tmp_string_array := '{}';
+	for tmp_record in select * from jsonb_each_text(tmp_jsonb)
 	loop
-		
-
-
+		tmp_string := format('%s := %s', tmp_record.key, tmp_record.value);
+		tmp_string_array := tmp_string_array || tmp_string;
 	end loop;
-	
-	
 
-	
-	for i in 1..array_length(model_parameter_name,1) LOOP 
-	LOOP
+	raise notice ' parameters are: %', tmp_string_array;
 
+	training_data_query := format('SELECT * FROM %s', ts_training_table);
+	test_data_query := format('SELECT * FROM %s', ts_target_table);
+	EXECUTE format('SELECT %s(%s, time_column_name:=%L, target_column_name:=%L, training_data:=%L, test_data:=%L)',
+			chosen_method,
+			(SELECT string_agg(format('%s',tmp_string_array[j]), ',')
+				FROM generate_subscripts(tmp_string_array, 1) AS j),
+			input_time_col_names[0],
+			target_column_name,
+			training_data_query,
+			test_data_query) into predictions;
 
-
-	END LOOP;
- 	
--- 	--separate the json into parameters
-	--TABLE %s (method text, parameters json, result numeric)', results_table
-	
-
-
--- 	predictions = arima_predict(time_window, p , d , q , time_column_name , target_column_name , training_data, test_data)
+	raise notice '-----------predictions incoming:';
+	raise notice '%', predictions;
+ 	tmp_string_array := '{}';
 -- 	-- write the predictions in the table ts_target_table if ts is the method that has been chosen, ml_target_table if ML has been chosen
--- 	
--- 	
--- 	-- create array of columns to join (in the default case only time feature and target feature)
--- 	 test_joining_columns := input_time_col_names || target_column_name;
--- 	for input_clmns in select att_name from  sl_get_attributes(arg) LOOP
--- 		IF (SELECT input_clmns.att_name = ANY (test_joining_columns)) THEN
--- 			null;
--- 		else
--- 			test_not_joining_columns := test_not_joining_columns || input_clmns.att_name;
--- 		END IF;
--- 	end loop;
--- 
---          RETURN QUERY EXECUTE sl_return(arg, sl_build_union_right_join_debug(arg, test_not_joining_columns, test_joining_columns, ts_target_table));
-         perform sl_drop_view_cascade(input_table_tmp_name);
-         
+	for tmp_record in EXECUTE format('SELECT %s as t FROM %s ORDER BY %s ASC', 
+		input_time_col_names[0],
+		ts_target_table,
+		input_time_col_names[0]
+		) 
+	LOOP
+		tmp_string_array := tmp_string_array || tmp_record.t::text;
+	END LOOP;
 
+	raise notice 'time is %', tmp_string_array;
+	for i in 1..array_length(tmp_string_array, 1) LOOP
+		EXECUTE format('UPDATE %s SET %s = %s WHERE %s=%L',
+			input_table_tmp_name,
+			target_column_name,
+			predictions[i],
+			input_time_col_names[0],
+			tmp_string_array[i]
+			);
+	END LOOP;
 
-
+        RETURN QUERY EXECUTE sl_return(arg, sl_build_out(arg));
+        perform sl_drop_view_cascade(input_table_tmp_name);
 END;
 $$ LANGUAGE plpgsql STRICT;
 
@@ -392,24 +378,3 @@ $$ LANGUAGE plpgsql STRICT;
 -- 
 solveselect watt in (select * from device_log) 
 using predictive_solver(start_time:='2015-11-12 10:00:00', end_time := '2015-11-12 23:00:00');
--- 
--- drop function python_test();
--- create function python_test() returns text as $$
--- 	return " ,--- python ";
--- $$ language plpythonu;
--- drop function pl_test();
--- create function pl_test() returns text as $$
--- begin
--- 	return  'miao';
--- end;
--- $$ language plpgsql;
-
-CREATE TABLE jsontest(
-	mahman	json
-);
-
-select a->> time_window from (select mahman as a from jsontest limit 1)
-
-insert into jsontest values
-('{"time_window":"20","p":"3","d":"0", "q":"3"}')
-

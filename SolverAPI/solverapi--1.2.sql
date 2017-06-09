@@ -591,8 +591,9 @@ $$ LANGUAGE SQL IMMUTABLE STRICT;
 -- t2.watt = t1.watt
 -- where t1.time_t is Null and t1.watt is Null;
 drop function sl_build_union_right_join(sl_solver_arg, name[], name[], text);
-CREATE OR REPLACE FUNCTION sl_build_out_union_right_join(arg sl_solver_arg, not_joining_clmns name[], joining_clmns name[], sql text) 
-RETURNS sl_viewsql_out AS $$ 
+CREATE OR REPLACE FUNCTION sl_build_out_union_right_join(arg sl_solver_arg, not_joining_clmns name[], 
+	joining_clmns name[], sql text) RETURNS sl_viewsql_out 
+AS $$ 
 SELECT format('SELECT * FROM %s AS r UNION ALL SELECT %s, %s FROM %s AS q LEFT JOIN %s AS s ON %s WHERE %s',
 		arg.tmp_name,
 		(SELECT string_agg(format('null as %s',quote_ident(not_joining_clmns[i])), ',')

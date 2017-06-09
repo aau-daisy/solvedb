@@ -26,22 +26,10 @@ drop table if exists sl_pr_model_instances;
 create table sl_pr_model_instances 
 (
 	sid 		serial primary key,
-	model_id	int,
-	parameter_id 	int,
-	value		numeric,
-	foreign key(model_id) references sl_pr_models(sid),
-	foreign key(parameter_id) references sl_pr_model_parameters(sid)
+	model_method	text,
+	parameters 	jsonb
 );
 
-
-insert into sl_pr_models(model, predict) values
-('arima_statsmodels', 'arima_predict')
-
-insert into sl_pr_model_parameters(model_id, parameter_id, type, low_range, high_range) values 
-(1, 'time_window', 'integer', 5, 15),
-(1, 'p', 'integer', 0, 3),
-(1, 'd', 'integer', 0, 2),
-(1, 'q', 'integer', 0, 3);
 
 
 
@@ -194,12 +182,10 @@ CREATE OR REPLACE FUNCTION sl_build_view_except_from_sql(input_table text, sql t
 		id,
 		id,
 		sql);
-		raise notice '---- %', query;
 		EXECUTE query;
 	query := 'SELECT COUNT(*) FROM ' || table_name;     
 	execute query into c ;
 	-- check that the table contains data to fill
-	raise notice 'the number of rows in exclude is %', c;
 	IF c = 0 THEN
 		RETURN null;
 	ELSE
@@ -207,8 +193,25 @@ CREATE OR REPLACE FUNCTION sl_build_view_except_from_sql(input_table text, sql t
 	END IF;
 END;
 $$ LANGUAGE plpgsql STRICT;
----------EVALUATION MODELS
 
+
+-- create the temporary table to store the intermidiate results of the prediction models
+DROP FUNCTION IF EXISTS sl_build_pr_results_table();
+CREATE OR REPLACE FUNCTION sl_build_pr_results_table() returns text
+as $$
+	declare 
+		table_name text := sl_get_unique_tblname() || '_pr_results';
+	begin
+		EXECUTE format('CREATE TEMP TABLE %s (sid SERIAL PRIMARY KEY,
+			method text, parameters jsonb, result numeric)', table_name);
+		RETURN table_name; 
+	END;
+$$ language plpgsql;
+
+
+
+
+---------EVALUATION MODELS
 
 -- RMSE of two columns of values
 DROP FUNCTION IF EXISTS sl_evaluation_rmse(numeric[], numeric[]);
@@ -231,12 +234,3 @@ RETURNS NUMERIC AS $$
 $$ LANGUAGE plpythonu;
 
 --------------------------------------------------------------------------------
-
-
-select count(*) from (SELECT id,watt,sl_col_111 from sl_tbl_1931_pr_input_relation 
-except ())
-
-
-
-select id,watt,sl_col_111 from sl_tbl_1931_pr_input_relation 
-where sl_col_111 in (select sl_col_111 from sl_tbl_1935_ml_target_view)

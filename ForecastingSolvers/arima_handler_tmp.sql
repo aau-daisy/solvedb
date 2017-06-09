@@ -2,17 +2,16 @@
 -- VS SolveDB inner parameter solving functionalities
 DROP FUNCTION IF EXISTS arima_handler(text, name, name, text, text);
 CREATE FUNCTION arima_handler(results_table text, time_column_name name, target_column_name name, training_data text, test_data text)
-returns numeric[] as $$
+returns void as $$
 
 	import sys
 
 	print "----------------------arima handler"
 
-	time_window_parameters = [5,10,20]
-	p_parameters = [0,1,2,3]
+	time_window_parameters = [5, 10, 15]
+	p_parameters = [0, 1, 2, 3]
 	d_parameters = [0,1,2]
 	q_parameters = [0,1,2,3]
-	trained_parameters = []
 
 	test_values = []
 	lowest_RMSE = sys.float_info.max
@@ -40,11 +39,9 @@ returns numeric[] as $$
 					rv = plpy.execute(plan, [test_values, predictions])
 					rmse = rv[0]['rmse']
 					# optimize the parameters
-					plpy.notice("RMSE IS: ", rmse)
 					if rmse is not None and rmse < lowest_RMSE:
 						lowest_RMSE = rmse
 						best_parameters_set = {"time_window":time_window, "p":p, "d":d, "q":q}
-						trained_parameters = [time_window, p,d,q]
 
 
 	# check if the predictions have been generated
@@ -52,18 +49,16 @@ returns numeric[] as $$
 		return
 	# print the parameters of the model
 	# save the model on the model table
-	query = "insert into " + results_table + " values ('arima_predict','{"
+	query = "insert into " + results_table + "(method, parameters, result) values ('arima_predict','{"
 	query += "\"time_window\":\"{time_window}\",\"p\":\"{p}\",\"d\":\"{d}\", \"q\":\"{q}\"".format(**best_parameters_set)
 	query += "}', " + str(lowest_RMSE)   + ")"
 
 	plpy.execute(query)
 
-	query = "insert into sl_pr_model_instances values ('arima_predict()', {"
+	query = "insert into sl_pr_model_instances(model_method, parameters) values ('arima_predict', '{"
 	query += "\"time_window\":\"{time_window}\",\"p\":\"{p}\",\"d\":\"{d}\", \"q\":\"{q}\"".format(**best_parameters_set)
 	query += "}')"
 	plpy.execute(query)
-	return trained_parameters
-	
 	
 $$ LANGUAGE plpythonu;
 
@@ -77,7 +72,7 @@ $$ LANGUAGE plpythonu;
 -- 
 -- create or replace function test2() returns void as $$
 -- 	a = [1,2,3]
--- 	plan = plpy.prepare("select test1($1, $2)", ["int[]", "int[]"])
+-- 	plan = plpy.prepare("select test1(a:=$1, b:= $2)", ["int[]", "int[]"])
 -- 	rv = plpy.execute(plan, [a, a])
 -- 	for line in rv:
 -- 		plpy.notice("line is ", line, "\n")
