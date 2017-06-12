@@ -1,7 +1,0 @@
-# Generic ARIMA Solver
-comment = 'Time series ARIMA forecasting solver for PostreSQL 9.6 (by Davide)'
-default_version = '1.0'
-module_pathname = '$libdir/arimasolver'
-requires = 'solverapi, plpythonu'
-relocatable = false
-schema = public
