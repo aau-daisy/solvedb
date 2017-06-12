@@ -1,3 +1,75 @@
+﻿-- complain if script is sourced in psql, rather than via CREATE EXTENSION
+--\echo Use "CREATE EXTENSION predictive_solver" to load this file. \quit
+
+-- Registers the solver and 1 method.
+delete from sl_solver where name = 'predictive_solver';
+
+
+WITH
+-- Registers the solver
+  solver AS   (INSERT INTO sl_solver(name, version, author_name, author_url, description)
+                 values ('predictive_solver', 1.0, 'Davide Frazzetto', 'http://vbn.aau.dk/en/persons/davide-frazzetto(448b0269-416f-4a18-80b8-ec6b6f0bdb71).html', 'Main Predictive solver advisor') 
+              returning sid),     
+
+-- Registers the BASIC method. It has no parameters.
+ method1 AS  (INSERT INTO sl_solver_method(sid, name, name_full, func_name, prob_name, description)
+                  SELECT sid, 'advisor', 'default predictive solver', 'predictive_solver_advisor', 'predictive problem', 'Manages the generic prediction tasks' 
+		  FROM solver RETURNING mid),
+
+-- Register arima methods.
+ method2 AS  (INSERT INTO sl_solver_method(sid, name, name_full, func_name, prob_name, description)
+                  SELECT sid, 'arima', 'arima predictive solver', 'arima_solver', 'predictive problem', 'Solver for ARIMA forecasting model' 
+		  FROM solver RETURNING mid),	
+
+-- Register feature selector solver
+ method3 AS  (INSERT INTO sl_solver_method(sid, name, name_full, func_name, prob_name, description)
+                  SELECT sid, 'feature_selector', 'feature selection solver', 'f_selector_solver', 'predictive problem', 'Solver for feature selection' 
+		  FROM solver RETURNING mid),
+
+-- Register the parameters
+
+     spar2 AS    (INSERT INTO sl_parameter(name, type, description, value_default, value_min, value_max)
+                  values ('start_time' , 'text', 'starting_time', null, null, null) 
+                  RETURNING pid),
+     sspar2 AS   (INSERT INTO sl_solver_param(sid, pid)
+                  SELECT sid, pid FROM solver, spar2
+                  RETURNING sid),
+     spar3 AS    (INSERT INTO sl_parameter(name, type, description, value_default, value_min, value_max)
+                  values ('end_time' , 'text', 'ending_time', null, null, null) 
+                  RETURNING pid),
+     sspar3 AS   (INSERT INTO sl_solver_param(sid, pid)
+                  SELECT sid, pid FROM solver, spar3
+                  RETURNING sid),
+     spar5 AS    (INSERT INTO sl_parameter(name, type, description, value_default, value_min, value_max)
+                  values ('frequency' , 'text', 'prediction frequency', null, null, null) 
+                  RETURNING pid),
+     sspar5 AS   (INSERT INTO sl_solver_param(sid, pid)
+                  SELECT sid, pid FROM solver, spar5
+                  RETURNING sid),
+     spar7 AS    (INSERT INTO sl_parameter(name, type, description, value_default, value_min, value_max)
+                  values ('features' , 'text', 'feature columns to use', null, null, null) 
+                  RETURNING pid),
+     sspar7 AS   (INSERT INTO sl_solver_param(sid, pid)
+                  SELECT sid, pid FROM solver, spar7
+                  RETURNING sid),     
+     spar8 AS    (INSERT INTO sl_parameter(name, type, description, value_default, value_min, value_max)
+                  values ('methods' , 'text', 'prediction methods to test', null, null, null) 
+                  RETURNING pid),
+     sspar8 AS   (INSERT INTO sl_solver_param(sid, pid)
+                  SELECT sid, pid FROM solver, spar8
+                  RETURNING sid)  
+
+-- Perform the actual insert
+SELECT count(*) FROM solver, method1, method2, method3, spar2, sspar2, spar3, sspar3, spar5, sspar5, spar7, sspar7, spar8, sspar8;
+
+-- Set the default method
+UPDATE sl_solver s
+SET default_method_id = mid
+FROM sl_solver_method m
+WHERE (s.sid = m.sid) AND (s.name = 'predictive_solver') AND (m.name='advisor');
+
+
+
 ﻿--Install the solver method
 CREATE OR REPLACE FUNCTION predictive_solver_advisor(arg sl_solver_arg) RETURNS setof record AS $$
 DECLARE
@@ -63,10 +135,10 @@ DECLARE
 	tmp_jsonb		jsonb;
 	predictions		numeric[];
 	model_fit_result	numeric[];
+	training_test		jsonb;
      
 BEGIN       
 
-	raise notice 'this is the default method';   
 	PERFORM sl_create_view(sl_build_out(arg), input_table_tmp_name); 
 
 	--------//////     	SETUP		////-------------------------------
@@ -86,10 +158,15 @@ BEGIN
 	
 	-- check the ensamble of forecasting methods to test (from input or default)
 	IF attMethods is null THEN
-		ml_methods_to_test := enum_range(null::sl_supported_ml_forecasting_methods)::text[];
-		test_ml_methods := True;
-		ts_methods_to_test := enum_range(null::sl_supported_ts_forecasting_methods)::text[];
-		test_ts_methods := True;
+		for tmp_record in select * from sl_pr_models loop
+			if tmp_record.type = 'ts' then
+				ts_methods_to_test := ts_methods_to_test || tmp_record.predict::text;
+				test_ts_methods := True;
+			else
+				ml_methods_to_test := ml_methods_to_test || tmp_record.predict::text;
+				test_ml_methods := True;
+			end if;
+		end loop;
 	ELSE
 		tmp_string_array := string_to_array(attMethods, ',');
 		for i in 1..array_length(tmp_string_array,1) LOOP
@@ -104,6 +181,9 @@ BEGIN
 			END IF;
 		END LOOP;
 	END IF;
+
+
+	
 
 	-- control that sets if to test ML/TS
 	IF array_length(ml_methods_to_test, 1) > 0 THEN
@@ -133,50 +213,6 @@ BEGIN
 		end if;		
 	 end loop;
 
--- 	IF test_ts_methods THEN
--- 		-- check time arguments (if time columns are present in the table)
--- 		 if array_length(input_time_col_names,1) = 0 THEN
--- 			RAISE EXCEPTION 'No time columns present in the given Table. Impossible to process time series.';
--- 		 END IF;
--- 
--- 		IF attStartTime IS NOT NULL THEN
--- 			attStartTime = convert_date_string(attStartTime);
--- 			IF attStartTime IS NULL THEN
--- 				RAISE EXCEPTION 'Given START TIME is not a recognizable time format, or the date is incorrect.';
--- 			END IF;
--- 		END IF;
--- 		IF attEndTime IS NOT NULL THEN
--- 			attEndTime = convert_date_string(attEndTime);
--- 			IF attEndTime IS NULL THEN
--- 				RAISE EXCEPTION 'Given END TIME is not a recognizable time format, or the date is incorrect.';
--- 			END IF;
--- 		END IF;
--- 
---  		BEGIN
--- 			IF attFrequency IS NOT NULL THEN
--- 				timeFrequency := attFrequency::int; 
--- 			ELSE	
--- 				timeFrequency := -1;
--- 			END IF;
--- 			tmp_string := 'select ' || target_column_name || ' from ' || input_table_tmp_name || ' where ' || target_column_name || ' is not null limit 1';
--- 			execute tmp_string into tmp_numeric;
--- 		EXCEPTION
--- 			WHEN SQLSTATE '22P02' THEN
--- 				RAISE EXCEPTION 'Impossible to parse given argument/s';
--- 		END;
--- 		
--- 		IF (attStartTime IS NOT NULL AND attEndTime IS NULL) OR (attStartTime IS NULL AND attEndTime IS NOT NULL) THEN
--- 			RAISE EXCEPTION 'Prediction time interval needs to be defined with <start,end> as 
--- 				start_time:="your_start_time", end_time:="your_end_time"';
--- 		END IF;
--- 
--- 		IF (attStartTime IS NOT NULL AND attEndTime IS NOT NULL) AND attStartTime > attEndTime THEN
--- 			RAISE EXCEPTION 'Error in given time interval: start_time > end_time.';
--- 		END IF;
--- 
--- 		
--- 	END IF;
-
 	 -- set the user defined features (if found)
 	IF attFeatures IS NULL THEN
 		-- NOTHING, THE FEATURE SELECTOR WILL CHOOSE THE FEATURES
@@ -200,165 +236,96 @@ BEGIN
 		end if;
 	END IF;
 
-	-- split into training data (with filled target column) and target data (with empty target column/given time range)
-	-- separate traning data from target data (for ml methods)
-	tmp_string_array := final_ml_features;
-	tmp_string_array := tmp_string_array ||  arg.tmp_id::text;
-	IF test_ml_methods THEN
-		ml_target_table := separate_input_relation_on_empty_rows(target_column_name, tmp_string_array, input_table_tmp_name);
-		IF ml_target_table is null THEN 
-			RAISE EXCEPTION 'No rows to fill in the given Table. Model training/saving not yet implemented.';
-		END IF;
-		tmp_string_array := tmp_string_array || target_column_name::text;
-		ml_training_table := sl_build_view_except_from_sql(input_table_tmp_name, ml_target_table, 
-							arg.tmp_id, tmp_string_array);
-		IF ml_training_table is null THEN
-			RAISE EXCEPTION 'No rows for training in the given Table. All rows have null values for the specified target.';
-		END IF;
-	END IF;
-
--- 	tmp_string_array := '{}';
--- 	tmp_string_array := tmp_string_array || final_ts_features[0];
--- 	tmp_string_array := tmp_string_array || arg.tmp_id::text || target_column_name::text;
--- 	-- separate training data from target data (for time series)
--- 	IF test_ts_methods THEN
--- 		ts_target_table := separate_input_relation_on_time_range(target_column_name, arg.tmp_id, final_ts_features[0], timeFrequency,
--- 				input_table_tmp_name, attStartTime, attEndTime);
--- 		IF ts_target_table is null THEN 
--- 			RAISE EXCEPTION 'No rows to fill in the given Table. Model training/saving not yet implemented.';
--- 		END IF;
--- 
--- 		ts_training_table := sl_build_view_except_from_sql(input_table_tmp_name, ts_target_table, arg.tmp_id, tmp_string_array);
--- 		IF ts_training_table is null THEN
--- 			RAISE EXCEPTION 'No rows for training in the given Table. All rows have null values for the specified target.';
--- 		END IF;
--- 	END IF;
+-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 	-- split into training data (with filled target column) and target data (with empty target column/given time range)
+-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 	-- separate traning data from target data (for ml methods)
+-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 	tmp_string_array := final_ml_features;
+-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 	tmp_string_array := tmp_string_array ||  arg.tmp_id::text;
+-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 	IF test_ml_methods THEN
+-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 		ml_target_table := separate_input_relation_on_empty_rows(target_column_name, tmp_string_array, input_table_tmp_name);
+-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 		IF ml_target_table is null THEN 
+-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 			RAISE EXCEPTION 'No rows to fill in the given Table. Model training/saving not yet implemented.';
+-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 		END IF;
+-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 		tmp_string_array := tmp_string_array || target_column_name::text;
+-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 		ml_training_table := sl_build_view_except_from_sql(input_table_tmp_name, ml_target_table, 
+-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 							arg.tmp_id, tmp_string_array);
+-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 		IF ml_training_table is null THEN
+-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 			RAISE EXCEPTION 'No rows for training in the given Table. All rows have null values for the specified target.';
+-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 		END IF;
+-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 	END IF;
 
 
 
 	-- ML METHODS: create K views for k cross folding on the training data 
 	-- TO DO: PUSH IT INSIDE THE METHOD, AS THE FEATURE SELECTION WILL PROJECT SOME OF THE COLUMNS
-	execute 'SELECT COUNT(*) FROM ' || ml_training_table into input_length;
-	if test_ml_methods THEN	
-		for i in 0..(k-1) loop
-			tmp_string := sl_get_unique_tblname() || 'ml_cross_test_' || i;
-			EXECUTE format('CREATE OR REPLACE TEMP VIEW %s (%s,%s) AS SELECT %s,%s FROM %s LIMIT (%s) OFFSET (%s)', 
-				tmp_string,
-				(SELECT string_agg(format('%s',quote_ident(input_feature_col_names[j])), ',')
-				FROM generate_subscripts(input_feature_col_names, 1) AS j),
-				target_column_name,
-				(SELECT string_agg(format('%s',quote_ident(input_feature_col_names[j])), ',')
-				FROM generate_subscripts(input_feature_col_names, 1) AS j),
-				target_column_name,
-				ml_training_table,
-				input_length/k,
-				i * (input_length/k));
-			kCrossTestViews := kCrossTestViews || tmp_string;
-			tmp_string := sl_get_unique_tblname() || 'ml_cross_training_' || i;
-			EXECUTE format('CREATE OR REPLACE TEMP VIEW %s (%s, %s) AS SELECT %s, %s from %s EXCEPT SELECT * FROM %s',
-				tmp_string,
-				(SELECT string_agg(format('%s',quote_ident(input_feature_col_names[j])), ',')
-				FROM generate_subscripts(input_feature_col_names, 1) AS j),
-				target_column_name,
-				(SELECT string_agg(format('%s',quote_ident(input_feature_col_names[j])), ',')
-				FROM generate_subscripts(input_feature_col_names, 1) AS j),
-				target_column_name,
-				ml_training_table,
-				kCrossTestViews[i+1]);
-			 kCrossTrainingViews := kCrossTrainingViews || tmp_string;
-		end loop;
-	END IF;
+-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 	execute 'SELECT COUNT(*) FROM ' || ml_training_table into input_length;
+-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 	if test_ml_methods THEN	
+-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 		for i in 0..(k-1) loop
+-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 			tmp_string := sl_get_unique_tblname() || 'ml_cross_test_' || i;
+-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 			EXECUTE format('CREATE OR REPLACE TEMP VIEW %s (%s,%s) AS SELECT %s,%s FROM %s LIMIT (%s) OFFSET (%s)', 
+-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 				tmp_string,
+-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 				(SELECT string_agg(format('%s',quote_ident(input_feature_col_names[j])), ',')
+-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 				FROM generate_subscripts(input_feature_col_names, 1) AS j),
+-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 				target_column_name,
+-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 				(SELECT string_agg(format('%s',quote_ident(input_feature_col_names[j])), ',')
+-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 				FROM generate_subscripts(input_feature_col_names, 1) AS j),
+-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 				target_column_name,
+-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 				ml_training_table,
+-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 				input_length/k,
+-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 				i * (input_length/k));
+-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 			kCrossTestViews := kCrossTestViews || tmp_string;
+-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 			tmp_string := sl_get_unique_tblname() || 'ml_cross_training_' || i;
+-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 			EXECUTE format('CREATE OR REPLACE TEMP VIEW %s (%s, %s) AS SELECT %s, %s from %s EXCEPT SELECT * FROM %s',
+-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 				tmp_string,
+-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 				(SELECT string_agg(format('%s',quote_ident(input_feature_col_names[j])), ',')
+-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 				FROM generate_subscripts(input_feature_col_names, 1) AS j),
+-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 				target_column_name,
+-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 				(SELECT string_agg(format('%s',quote_ident(input_feature_col_names[j])), ',')
+-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 				FROM generate_subscripts(input_feature_col_names, 1) AS j),
+-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 				target_column_name,
+-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 				ml_training_table,
+-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 				kCrossTestViews[i+1]);
+-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 			 kCrossTrainingViews := kCrossTrainingViews || tmp_string;
+-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 		end loop;
+-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 	END IF;
 
 	
--- 	-- TS METHODS: Create 70%-30% split on the training data
--- 	execute 'SELECT COUNT(*) FROM ' || ts_training_table into input_length;
--- 	IF test_ts_methods THEN
--- 		EXECUTE format('CREATE VIEW %s AS SELECT %s,%s FROM %s LIMIT %s',
--- 			ts_training,
--- 			input_time_col_names[0],
--- 			target_column_name,
--- 			ts_training_table,
--- 			((input_length/100) * 70)::int);
--- 		EXECUTE format('CREATE TABLE %s AS SELECT %s,%s FROM %s OFFSET %s',
--- 			ts_test,
--- 			input_time_col_names[0],
--- 			target_column_name,
--- 			ts_training_table,
--- 			((input_length/100) * 70)::int);
--- 	END IF;
 
 
-	perform sl_time_series_models_handler(arg, target_column_name, target_column_type, attStartTime, 
-		attEndTime, attFrequency, final_ts_features[0], input_table_tmp_name, 
-		results_table, ts_methods_to_test);
+	
 ---------------------------------------- ////// END SETUP	---------------------------------------------------------
 
-	-- test only for each TS model to test, 
-		-- fit the model on the training data
-			-- provide the user with information on the model performance
-		-- fill rows with prediction
-		-- join with original table
-
-		
-
-	training_data_query := format('SELECT * FROM %s', ts_training);
-	test_data_query := format('SELECT * FROM %s', ts_test);
-	FOREACH method SLICE 1 IN ARRAY ts_methods_to_test LOOP
-		raise notice 'fitting method: %', method[1];
-		-- get user defined parameter to test
-		for row_data in execute format('select * from sl_pr_model_parameters  where model_id in (select sid from sl_pr_models where model = ''%s'')', 'arima_stats_models')
-		LOOP
-			model_parameter_name    := model_parameter_name  ||	row_data.parameter;
-			model_parameter_value	:= model_parameter_value || 	row_data.value;
-			model_parameter_low	:= model_parameter_low   ||	row_data.low_range;
-			model_parameter_high	:= model_parameter_high  ||	row_data.high_range;
-			model_parameter_type	:= model_parameter_type  ||	row_data.type;
-		END LOOP;
-
- 		perform arima_handler(results_table, input_time_col_names[0], target_column_name, training_data_query, test_data_query);
-	END LOOP;
+	select sl_time_series_models_handler(arg, target_column_name, target_column_type, attStartTime, 
+		attEndTime, attFrequency, final_ts_features[0], input_table_tmp_name, 
+		results_table, ts_methods_to_test) into training_test;	
 
 -- 	look in the results table the model with the best result
 -- 	result table contains the followiing values [method text, parameters json, result numeric]
 --	find the best model method
 	execute format('select method from %s where result is not null order by result desc limit 1', results_table) into chosen_method;
-
 	-- iterate through parameters
-	execute format('select parameters from %s where result is not null order by result desc limit 1', results_table) into tmp_jsonb;
-	tmp_string_array := '{}';
-	for tmp_record in select * from jsonb_each_text(tmp_jsonb)
-	loop
-		tmp_string := format('%s := %s', tmp_record.key, tmp_record.value);
-		tmp_string_array := tmp_string_array || tmp_string;
-	end loop;
+	execute format('select parameters from %s where result is not null order by result desc limit 1', results_table) into tmp_string;
 
-	raise notice ' parameters are: %', tmp_string_array;
-
-	training_data_query := format('SELECT * FROM %s', ts_training_table);
-	test_data_query := format('SELECT * FROM %s', ts_target_table);
-	EXECUTE format('SELECT %s(%s, time_column_name:=%L, target_column_name:=%L, training_data:=%L, test_data:=%L)',
+	training_data_query := format('SELECT * FROM %s', training_test->'training');
+	EXECUTE format('SELECT count(*) FROM %s', training_test->'test') into i;
+	EXECUTE format('SELECT %s(%s, time_column_name:=%L, target_column_name:=%L, training_data:=%L, number_of_predictions:=%s)',
 			chosen_method,
-			(SELECT string_agg(format('%s',tmp_string_array[j]), ',')
-				FROM generate_subscripts(tmp_string_array, 1) AS j),
+			tmp_string, 
 			input_time_col_names[0],
 			target_column_name,
 			training_data_query,
-			test_data_query) into predictions;
+			i) into predictions;
 
-	raise notice '-----------predictions incoming:';
-	raise notice '%', predictions;
  	tmp_string_array := '{}';
 -- 	-- write the predictions in the table ts_target_table if ts is the method that has been chosen, ml_target_table if ML has been chosen
 	for tmp_record in EXECUTE format('SELECT %s as t FROM %s ORDER BY %s ASC', 
 		input_time_col_names[0],
-		ts_target_table,
+		training_test->'test',
 		input_time_col_names[0]
 		) 
 	LOOP
 		tmp_string_array := tmp_string_array || tmp_record.t::text;
 	END LOOP;
 
-	raise notice 'time is %', tmp_string_array;
 	for i in 1..array_length(tmp_string_array, 1) LOOP
 		EXECUTE format('UPDATE %s SET %s = %s WHERE %s=%L',
 			input_table_tmp_name,
@@ -378,3 +345,5 @@ $$ LANGUAGE plpgsql STRICT;
 -- 
 solveselect watt in (select * from device_log) 
 using predictive_solver(start_time:='2015-11-12 10:00:00', end_time := '2015-11-12 23:00:00');
+
+

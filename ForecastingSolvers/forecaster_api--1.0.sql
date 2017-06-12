@@ -1,11 +1,28 @@
 ﻿------ Table TO STORE PREDICTIVE MODELS
+create type sl_forecasting_model_type as enum(
+			'ml',
+			'ts'
+);
+
+DROP TYPE  IF EXISTS sl_model_parameter_type cascade;
+CREATE TYPE sl_model_parameter_type AS (
+	name		text,
+	type		text,
+	value		numeric,
+	low_range	numeric,
+	high_range	numeric,
+	accepted_values	numeric[]
+);
+
+
 drop table if exists sl_pr_models CASCADE;
 CREATE TABLE sl_pr_models
 (
 	sid		serial PRIMARY KEY,		-- the id of the predictive model
 	model		name not null unique,		-- name
 	predict		varchar(255) UNIQUE not null,		-- name of the predict method
-	description 	text				-- description of the model
+	description 	text,				-- description of the model
+	type		sl_forecasting_model_type		-- type of model: ML, or TS
 );
 
 
@@ -15,12 +32,13 @@ create table sl_pr_model_parameters
 	sid 		serial primary key,
 	model_id	int,
 	parameter	text not null,
-	type		text not null,
-	value		numeric,
-	low_range	numeric,
-	high_range	numeric,
+	parameter_info sl_model_parameter_type NOT NULL,	
 	foreign key(model_id) references sl_pr_models(sid)
 );
+
+
+
+
 
 drop table if exists sl_pr_model_instances;
 create table sl_pr_model_instances 
@@ -29,6 +47,8 @@ create table sl_pr_model_instances
 	model_method	text,
 	parameters 	jsonb
 );
+
+
 
 
 
@@ -55,6 +75,31 @@ AS $$
 	except Exception:
 		return None
 $$ LANGUAGE plpythonu;
+
+
+create or replace function sl_extract_column_to_array(query text, col name)
+returns numeric[] as $$
+
+	result = []
+	rv = plpy.execute(query);
+	for data_row in rv:
+		result.append(data_row[str(col)])
+	return result
+$$ language plpythonu;
+
+
+CREATE OR REPLACE FUNCTION sl_extract_parameters(parameters text[], query text) 
+returns  text[] as $$
+	resulting_parameters_lines = []
+	rv = plpy.execute(query)
+	for data_row in rv:
+		line = ""
+		for parameter in parameters:
+			line += str(parameter) + " := " + str(data_row[str(parameter)]) + ", "
+		resulting_parameters_lines.append(line[:-2])
+	return resulting_parameters_lines
+
+$$ language plpythonu;
 
 
 drop function if exists separate_input_relation_on_time_range(name, name, text, int, text, text, text);
@@ -203,7 +248,7 @@ as $$
 		table_name text := sl_get_unique_tblname() || '_pr_results';
 	begin
 		EXECUTE format('CREATE TEMP TABLE %s (sid SERIAL PRIMARY KEY,
-			method text, parameters jsonb, result numeric)', table_name);
+			method text, parameters text, result numeric)', table_name);
 		RETURN table_name; 
 	END;
 $$ language plpgsql;
@@ -234,3 +279,5 @@ RETURNS NUMERIC AS $$
 $$ LANGUAGE plpythonu;
 
 --------------------------------------------------------------------------------
+
+
