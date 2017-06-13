@@ -1,4 +1,5 @@
 ﻿------ Table TO STORE PREDICTIVE MODELS
+
 create type sl_forecasting_model_type as enum(
 			'ml',
 			'ts'
@@ -13,6 +14,7 @@ CREATE TYPE sl_model_parameter_type AS (
 	high_range	numeric,
 	accepted_values	numeric[]
 );
+
 
 
 drop table if exists sl_pr_models CASCADE;
@@ -32,7 +34,8 @@ create table sl_pr_model_parameters
 	sid 		serial primary key,
 	model_id	int,
 	parameter	text not null,
-	parameter_info sl_model_parameter_type NOT NULL,	
+	parameter_info  sl_model_parameter_type NOT NULL,
+	description 	text,	
 	foreign key(model_id) references sl_pr_models(sid)
 );
 
@@ -129,11 +132,14 @@ AS $$
 		most_probable_frequency = frequency
 
 	# create temporary table with rows to fill
+	rv = plpy.execute("select " + id + " from " + table_name + " order by " + time_column_name + " desc limit 1")
+	last_existing_id = rv[0][id]
+	
 	query = "select " + id + ", " +  time_column_name + ", " + target + " from " + table_name + " where " + time_column_name + " >= \'" + str(starting_datetime) + "\' and " + time_column_name + " <= \'" + str(ending_datetime) + "\'"
 	rv = plpy.execute(query)
 	lines_for_view = []
 	last_existing_line = starting_datetime
-	print "-----------------------" + query
+
 	for line in rv:
 		last_existing_line = datetime.strptime(line[time_column_name], '%Y-%m-%d %H:%M:%S')
 		last_existing_id = line[id];
@@ -254,6 +260,19 @@ as $$
 $$ language plpgsql;
 
 
+-----FUNCTIONS FOR GLOBAL VARIABLES
+
+CREATE OR REPLACE FUNCTION sl_set_print_model_summary_on() returns void as $$
+	GD["print_model_summary"] = True
+$$ language plpythonu;
+
+CREATE OR REPLACE FUNCTION sl_set_print_model_summary_off() returns void as $$
+	GD["print_model_summary"] = False
+$$ language plpythonu;
+
+CREATE OR REPLACE FUNCTION sl_check_print_model_summary() returns boolean as $$
+	return GD["print_model_summary"]
+$$ language plpythonu;
 
 
 ---------EVALUATION MODELS
@@ -266,7 +285,7 @@ RETURNS NUMERIC AS $$
 	from sklearn.metrics import mean_squared_error
 	from math import sqrt
 	if len(x) != len(y):
-		print "RMSE cannot be calculated on arrays of differnt size"
+		plpy.warning("RMSE cannot be calculated on arrays of differnt size")
 		return null
 
 	try:
@@ -277,6 +296,10 @@ RETURNS NUMERIC AS $$
 	return rmse
 
 $$ LANGUAGE plpythonu;
+
+
+
+
 
 --------------------------------------------------------------------------------
 
