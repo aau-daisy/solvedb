@@ -131,38 +131,55 @@ AS $$
 	else:
 		most_probable_frequency = frequency
 
-	# create temporary table with rows to fill
-	rv = plpy.execute("select " + id + " from " + table_name + " order by " + time_column_name + " desc limit 1")
-	last_existing_id = rv[0][id]
+	number_of_rows_to_fill = int((ending_datetime - starting_datetime).total_seconds() / float(most_probable_frequency))
+
+	rv = plpy.execute("select count(*) as the_count from (select " + time_column_name + " from "  + table_name + " where " + time_column_name + " >= \'" + str(starting_datetime) + "\' and " + time_column_name + " <= \'" + str(ending_datetime) + "\' order by " + time_column_name + " asc) as b")
+	number_of_rows_to_fill_already_in_table = int(rv[0]['the_count'])
 	
-	query = "select " + id + ", " +  time_column_name + ", " + target + " from " + table_name + " where " + time_column_name + " >= \'" + str(starting_datetime) + "\' and " + time_column_name + " <= \'" + str(ending_datetime) + "\'"
+	
+	# create temporary table with rows to fill
+	rv = plpy.execute("select max(" + id + ") as id from " + table_name)
+	last_existing_id = rv[0]['id']
+	
+	query = "select " + id + ", " +  time_column_name + ", " + target + " from " + table_name + " where " + time_column_name + " >= \'" + str(starting_datetime) + "\' and " + time_column_name + " <= \'" + str(ending_datetime) + "\' order by " + time_column_name + " asc"
 	rv = plpy.execute(query)
+	times_already_in = []
+
+	for line in rv:
+		times_already_in.append(datetime.strptime(line[time_column_name], '%Y-%m-%d %H:%M:%S'))
+
 	lines_for_view = []
 	last_existing_line = starting_datetime
 
-	for line in rv:
-		last_existing_line = datetime.strptime(line[time_column_name], '%Y-%m-%d %H:%M:%S')
-		last_existing_id = line[id];
-		# if the value column is empty, mark as to_be_filled
-		if not line[target]:
-			lines_for_view.append({'id':line[id], 'time':line[time_column_name], 'value':'null','fill':True})
-		else:
-			lines_for_view.append({'id':line[id], 'time':line[time_column_name], 'value':line[target], 'fill':False})
 
-
-	number_of_rows_to_fill = int((ending_datetime - last_existing_line).total_seconds() / float(most_probable_frequency))
-	for i in range(1, number_of_rows_to_fill+1):
-		lines_for_view.append({'id': (last_existing_id + i),'time':str(last_existing_line + timedelta(seconds=i * 3600)), 'value':'null', 'fill':True})
+	for i in range(number_of_rows_to_fill):
+		curr_time = (starting_datetime + timedelta(seconds=i * most_probable_frequency))
+		last_existing_id += i + 1
+		lines_for_view.append({'id': (last_existing_id),'time':str(curr_time), 'value':'null', 'fill':True})
+		if curr_time in times_already_in:
+			times_already_in.remove(curr_time)
+	
+	# add the already existing rows
+	for line in times_already_in:
+		last_existing_id += i + 1
+		lines_for_view.append({'id': (last_existing_id),'time':str(line), 'value':'null', 'fill':True})
 
 	# write the table on the db
 	tmp_table_name = str(plpy.execute('select * from sl_get_unique_tblname()')[0]['sl_get_unique_tblname']) + "_ts_target_view"
-	query = "CREATE TEMP TABLE " + tmp_table_name + " (" + id + " int, " + time_column_name  + " TIMESTAMP, " + target +   " NUMERIC, fill BOOLEAN)"
-	plpy.execute(query)
 
-	query = "INSERT INTO " + tmp_table_name + " VALUES "
+	## temporary table to store the rows, not sorted
+	plpy.execute('DROP TABLE IF EXISTS sl_temporary_table_for_splitting_data')
+	query = "CREATE TEMP TABLE sl_temporary_table_for_splitting_data(" + id + " int, " + time_column_name  + " TIMESTAMP, " + target +   " NUMERIC, fill BOOLEAN)"
+	plpy.execute(query)
+	query = "INSERT INTO sl_temporary_table_for_splitting_data VALUES "
 	for data in lines_for_view:
 		query += "({id},'{time}', {value}, {fill}),\n".format(**data)
 	plpy.execute(query[:-2])
+
+	## create the real table, with sorted rows
+	query = "CREATE TEMP TABLE " + tmp_table_name + " AS SELECT * FROM sl_temporary_table_for_splitting_data ORDER BY " + time_column_name + " ASC"
+	plpy.execute(query)
+
 
 	if plpy.execute('SELECT COUNT(*) AS the_count FROM ' + tmp_table_name)[0]['the_count'] == 0:
 		return None
@@ -210,8 +227,9 @@ $$ LANGUAGE plpgsql STRICT;
 -- Returns null if no rows are present in the resulting table
 -- id is the id of the table in sql on which to remove the rows from
 --
-DROP FUNCTION IF EXISTS sl_build_view_except_from_sql(text, text, name, text[]);
-CREATE OR REPLACE FUNCTION sl_build_view_except_from_sql(input_table text, sql text, id name, columns_to_project text[])
+DROP FUNCTION IF EXISTS sl_build_view_except_from_sql(text, text, name, text[], text);
+CREATE OR REPLACE FUNCTION sl_build_view_except_from_sql(input_table text, sql text, id name, 
+		columns_to_project text[], column_for_order text)
    RETURNS NAME AS $$
 	DECLARE 
 		table_name 	name;
@@ -220,7 +238,7 @@ CREATE OR REPLACE FUNCTION sl_build_view_except_from_sql(input_table text, sql t
 		i	text;
 	BEGIN
 		table_name := sl_get_unique_tblname();
-		query := format('CREATE VIEW %s(%s) AS SELECT %s from %s except (select %s from %s where %s in (select %s from %s))',
+		query := format('CREATE VIEW %s(%s) AS SELECT %s from %s except (select %s from %s where %s in (select %s from %s)) order by %s' ,
 		table_name,
 		(SELECT string_agg(format('%s',quote_ident(columns_to_project[j])), ',')
 				FROM generate_subscripts(columns_to_project, 1) AS j),
@@ -232,7 +250,8 @@ CREATE OR REPLACE FUNCTION sl_build_view_except_from_sql(input_table text, sql t
 		input_table,
 		id,
 		id,
-		sql);
+		sql,
+		column_for_order);
 		EXECUTE query;
 	query := 'SELECT COUNT(*) FROM ' || table_name;     
 	execute query into c ;

@@ -1,4 +1,4 @@
-﻿-- complain if script is sourced in psql, rather than via CREATE EXTENSION
+﻿``	`	`	-- complain if script is sourced in psql, rather than via CREATE EXTENSION
 --\echo Use "CREATE EXTENSION predictive_solver" to load this file. \quit
 
 -- Registers the solver and 1 method.

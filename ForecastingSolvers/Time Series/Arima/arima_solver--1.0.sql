@@ -21,11 +21,9 @@ AS $$
 	training_time	= []
 	training_target	= []
 
-	print training_data
 	
 	rv = plpy.execute(training_data)
 	for x in rv:
-		print x
 		training_target.append(x[target_column_name])
 		training_time.append(datetime.strptime(x[time_column_name], '%Y-%m-%d %H:%M:%S'));
 
@@ -35,7 +33,8 @@ AS $$
 
 	series = pd.Series(y_train[int(len(y_train) - (len(y_train) / float(100) * time_window)):len(y_train)],
                            x_train[int(len(x_train) - (len(x_train) / float(100) * time_window)):len(x_train)])
-                      
+
+                     
 	try:
 		arima_mod = sm.tsa.ARIMA(series.astype(float), order=(p,d,q))
 		arima_res = arima_mod.fit()
@@ -49,10 +48,8 @@ AS $$
 			plpy.notice(residuals.describe())
 		
 	except Exception as ex:
-		plpy.warning(format(ex))
 		predictions = np.array(y_train[len(y_train) - number_of_predictions:len(y_train)])
 	except ValueError as err:
-		plpy.warning(format(err))
 		predictions = np.array(y_train[len(y_train) - number_of_predictions:len(y_train)])
 	#--check for predictions that are nan
 	for pr in range(len(predictions)):

@@ -84,13 +84,14 @@ BEGIN
 			RAISE EXCEPTION 'No rows to fill in the given Table. Model training/saving not yet implemented.';
 		END IF;
 		ts_target_tables := ts_target_tables || tmp_name;
-
+		perform print_table('select * from ' || tmp_name);
 		tmp_name := sl_build_view_except_from_sql(input_table_tmp_name, tmp_name,
-					arg.tmp_id, tmp_string_array);
+					arg.tmp_id, tmp_string_array, time_feature);
 		IF tmp_name is null THEN
 			RAISE EXCEPTION 'No rows for training in the given Table. All rows have null values for the specified target.';
 		END IF;
 		ts_training_tables := ts_training_tables || tmp_name;
+		perform print_table('select * from ' || tmp_name);
 	ELSE	-- FILL NULL ROWS, TODO: implement
 		null;
 	END IF;
