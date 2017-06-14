@@ -68,6 +68,50 @@ CREATE TYPE sl_supported_ts_forecasting_methods AS ENUM ('arima');
 
 
 -- *********UTILITY FUNCTIONS FOR FORECASTING SOLVERS *********--
+
+-- This function rewrites the optimization problem of a TIME SERIES 
+--forecasting model into a SOLVESELECT,
+-- using the swarm solver to find the solution
+
+DROP FUNCTION IF EXISTS sl_convert_ts_fit_to_solveselect(text, name, text, numeric[], text, 
+							sl_model_parameter_type[]);
+
+CREATE FUNCTION sl_convert_ts_fit_to_solveselect(time_feature text, target name, training_data text, 
+						test_values numeric[], method text, 
+						parameters sl_model_parameter_type[])
+RETURNS record AS $$
+declare
+	tmp_record record;
+begin
+	execute format('SELECT * FROM (SOLVESELECT %s IN (SELECT %s) as sl_fts MINIMIZE (SELECT sl_evaluation_rmse(%L, %s(%s, time_column_name := %L, target_column_name := %L, training_data := %L, number_of_predictions := %s))::int) SUBJECTTO (SELECT %s FROM sl_fts) USING swarmops.pso(n:=100)) AS sl_tmp_tmp',
+		(SELECT string_agg(format('%s',(parameters[j]).name), ',')
+			FROM generate_subscripts(parameters, 1) AS j),
+		(SELECT string_agg(format('NULL::%s AS %s',
+				(parameters[j]).type, 
+				(parameters[j]).name), ',')
+			FROM generate_subscripts(parameters, 1) AS j),
+		test_values,
+		method,
+		(SELECT string_agg(format('%s := (SELECT %s from sl_fts)',
+			(parameters[j]).name,
+			(parameters[j]).name), ',')
+			FROM generate_subscripts(parameters, 1) AS j),
+		time_feature,
+		target,
+		('SELECT * FROM ' || training_data),
+		array_length(test_values,1),
+		(SELECT string_agg(format(' %s <= %s <= %s',
+			(parameters[j]).low_range,
+			(parameters[j]).name,
+			(parameters[j]).high_range), ',')
+			FROM generate_subscripts(parameters, 1) AS j)) into tmp_record;
+	return tmp_record;
+end;
+$$ language plpgsql;
+
+
+
+
 -- Converts a data string from an unknown date format to date of format YYYY-MM-DD HH:MM:SS
 drop function if exists convert_date_string(text);
 CREATE OR REPLACE FUNCTION convert_date_string(date_string text) RETURNS text
@@ -190,6 +234,16 @@ $$ LANGUAGE plpythonu;
 
 
 
+create function extract_fields_from_record(x record, fields text[]) returns text as $$
+
+	result = ""
+	foreach field in fields:
+		result.append(field + " := " + str(x[field]))
+	return result;
+$$ language plpythonu;
+
+
+
 drop function if exists separate_input_relation_on_empty_rows(text, text[], text);
 CREATE OR REPLACE FUNCTION separate_input_relation_on_empty_rows(target_column_name text, 
 		feature_column_names text[], table_name text)
@@ -229,7 +283,7 @@ $$ LANGUAGE plpgsql STRICT;
 --
 DROP FUNCTION IF EXISTS sl_build_view_except_from_sql(text, text, name, text[], text);
 CREATE OR REPLACE FUNCTION sl_build_view_except_from_sql(input_table text, sql text, id name, 
-		columns_to_project text[], column_for_order text)
+		columns_to_project text[], column_for_order_exclude text)
    RETURNS NAME AS $$
 	DECLARE 
 		table_name 	name;
@@ -238,7 +292,8 @@ CREATE OR REPLACE FUNCTION sl_build_view_except_from_sql(input_table text, sql t
 		i	text;
 	BEGIN
 		table_name := sl_get_unique_tblname();
-		query := format('CREATE VIEW %s(%s) AS SELECT %s from %s except (select %s from %s where %s in (select %s from %s)) order by %s' ,
+		query := format('CREATE VIEW %s(%s) AS SELECT %s from %s except 
+				(select %s from %s where %s in (select %s from %s)) order by %s' ,
 		table_name,
 		(SELECT string_agg(format('%s',quote_ident(columns_to_project[j])), ',')
 				FROM generate_subscripts(columns_to_project, 1) AS j),
@@ -248,10 +303,10 @@ CREATE OR REPLACE FUNCTION sl_build_view_except_from_sql(input_table text, sql t
 		(SELECT string_agg(format('%s',quote_ident(columns_to_project[j])), ',')
 				FROM generate_subscripts(columns_to_project, 1) AS j),
 		input_table,
-		id,
-		id,
+		column_for_order_exclude,
+		column_for_order_exclude,
 		sql,
-		column_for_order);
+		column_for_order_exclude);
 		EXECUTE query;
 	query := 'SELECT COUNT(*) FROM ' || table_name;     
 	execute query into c ;
@@ -263,7 +318,6 @@ CREATE OR REPLACE FUNCTION sl_build_view_except_from_sql(input_table text, sql t
 	END IF;
 END;
 $$ LANGUAGE plpgsql STRICT;
-
 
 -- create the temporary table to store the intermidiate results of the prediction models
 DROP FUNCTION IF EXISTS sl_build_pr_results_table();
@@ -300,26 +354,22 @@ $$ language plpythonu;
 DROP FUNCTION IF EXISTS sl_evaluation_rmse(numeric[], numeric[]);
 CREATE OR REPLACE FUNCTION sl_evaluation_rmse(x numeric[],y numeric[]) 
 RETURNS NUMERIC AS $$
+	import sys
+
 
 	from sklearn.metrics import mean_squared_error
 	from math import sqrt
 	if len(x) != len(y):
 		plpy.warning("RMSE cannot be calculated on arrays of differnt size")
-		return null
+		return None
 
 	try:
 		rmse = sqrt(mean_squared_error(x, y))
 	except Exception as ex:
-		return null
-		
+		return sys.float_info.max
 	return rmse
 
 $$ LANGUAGE plpythonu;
-
-
-
-
-
 --------------------------------------------------------------------------------
 
 

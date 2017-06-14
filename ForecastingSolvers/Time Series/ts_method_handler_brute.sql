@@ -47,6 +47,8 @@ BEGIN
 		FROM generate_subscripts(parameter_table, 1) AS k));
 	parameter_settings_lines := sl_extract_parameters(parameter_columns, query);
 
+	raise notice 'parameterlines -- %', parameter_settings_lines;
+
 	for i in 1..array_length(parameter_settings_lines,1) loop
 		query := format('SELECT %s(%s, time_column_name := %L, target_column_name := %L, 
 			training_data := %L, number_of_predictions := %s)',
@@ -57,6 +59,7 @@ BEGIN
 			  'SELECT * FROM ' || training_data,
 			   array_length(test_values, 1));
 		EXECUTE query into predictions;
+		raise notice 'predictions: %', predictions;
 		SELECT sl_evaluation_rmse(test_values, predictions) into rmse;
 		-- optimize the parameters
 		if rmse is not null and rmse < lowest_RMSE then
@@ -70,6 +73,7 @@ BEGIN
 		return;
 	end if;
 
+	raise notice 'bst_parameter_line: %', best_parameter_line;
 	-- save the best result of this model in the result table
 	EXECUTE format('INSERT INTO %s(method, parameters, result) VALUES (%L, %L, %s)',
 			results_table,

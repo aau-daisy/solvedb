@@ -1,12 +1,11 @@
 ﻿-- wrapper for the fit/predict functions
 -- training_data/test_data: 	sql views
 -- returns an array with the predicted values
-DROP FUNCTION IF EXISTS arima_predict(int,  int,  int,  int, text, text, text, int);
+DROP FUNCTION IF EXISTS arima_predict(int,int, int,  int, text, text, text, int);
 CREATE OR REPLACE FUNCTION arima_predict(time_window int, p int, d int, q int, time_column_name text,
  target_column_name text, training_data text, number_of_predictions int)
 RETURNS NUMERIC[]
 AS $$
-	print "---------------------arima_predict"
 	import pandas as pd
 	import statsmodels.api as sm
 	import numpy as np
@@ -21,7 +20,6 @@ AS $$
 	training_time	= []
 	training_target	= []
 
-	
 	rv = plpy.execute(training_data)
 	for x in rv:
 		training_target.append(x[target_column_name])
@@ -32,9 +30,9 @@ AS $$
 	y_train = np.array(training_target)
 
 	series = pd.Series(y_train[int(len(y_train) - (len(y_train) / float(100) * time_window)):len(y_train)],
-                           x_train[int(len(x_train) - (len(x_train) / float(100) * time_window)):len(x_train)])
+                            x_train[int(len(x_train) - (len(x_train) / float(100) * time_window)):len(x_train)])
 
-                     
+                    
 	try:
 		arima_mod = sm.tsa.ARIMA(series.astype(float), order=(p,d,q))
 		arima_res = arima_mod.fit()
@@ -48,8 +46,10 @@ AS $$
 			plpy.notice(residuals.describe())
 		
 	except Exception as ex:
+		#plpy.warning(format(ex))
 		predictions = np.array(y_train[len(y_train) - number_of_predictions:len(y_train)])
 	except ValueError as err:
+		#plpy.warning(format(err))
 		predictions = np.array(y_train[len(y_train) - number_of_predictions:len(y_train)])
 	#--check for predictions that are nan
 	for pr in range(len(predictions)):

@@ -84,17 +84,17 @@ BEGIN
 			RAISE EXCEPTION 'No rows to fill in the given Table. Model training/saving not yet implemented.';
 		END IF;
 		ts_target_tables := ts_target_tables || tmp_name;
-		perform print_table('select * from ' || tmp_name);
 		tmp_name := sl_build_view_except_from_sql(input_table_tmp_name, tmp_name,
 					arg.tmp_id, tmp_string_array, time_feature);
 		IF tmp_name is null THEN
-			RAISE EXCEPTION 'No rows for training in the given Table. All rows have null values for the specified target.';
+			RAISE EXCEPTION 'No rows for training in the given Table. 
+				All rows have null values for the specified target.';
 		END IF;
 		ts_training_tables := ts_training_tables || tmp_name;
-		perform print_table('select * from ' || tmp_name);
 	ELSE	-- FILL NULL ROWS, TODO: implement
 		null;
 	END IF;
+
 
 	-- Create 70%-30% (default value) split for each of the test/training set that need to be evaluated
 	for i in 1.. array_length(ts_training_tables, 1) LOOP
@@ -105,7 +105,7 @@ BEGIN
 			time_feature,
 			target_column_name,
 			ts_training_tables[i],
-			((tmp_integer/100) * 70)::int);
+			((tmp_integer::numeric/100.0) * 70.0)::int);
 		ts_training_sets := ts_training_sets || tmp_string;
 		tmp_string  := sl_get_unique_tblname() || '_pr_ts_test';
 		EXECUTE format('CREATE TABLE %s AS SELECT %s,%s FROM %s OFFSET %s',
@@ -113,14 +113,15 @@ BEGIN
 			time_feature,
 			target_column_name,
 			ts_training_tables[i],
-			((tmp_integer/100) * 70)::int);
+			((tmp_integer::numeric/100.0) * 70.0)::int);
 		ts_test_sets := ts_test_sets || tmp_string;
 	END LOOP;
 
 	for tmp_integer in 1..array_length(ts_training_sets, 1) LOOP
 		-- create test values
 		tmp_string := 'SELECT * FROM ' || ts_test_sets[tmp_integer];
-		tmp_numeric_array := sl_extract_column_to_array(tmp_string, target_column_name);			
+		tmp_numeric_array := sl_extract_column_to_array(tmp_string, target_column_name);
+
 
 		for i in 1..array_length(ts_methods_to_test,1) LOOP
 			-- get user defined parameter to test
@@ -131,10 +132,28 @@ BEGIN
 				method_parameters := method_parameters || tmp_record.parameter_info;
 			END LOOP;
 			-- call handler
-			perform ts_method_handler_brute(results_table, time_feature, 
-						target_column_name, ts_training_sets[i], 
-						tmp_numeric_array, 
-						ts_methods_to_test[i], method_parameters);
+			-- TEST solveselect rewriting
+			execute sl_convert_ts_fit_to_solveselect(time_feature, target_column_name, 
+							ts_training_sets[tmp_integer], tmp_numeric_array,
+							ts_methods_to_test[i], method_parameters) into tmp_record;
+			raise exception '%', tmp_record;
+
+-- 			tmp_string := format('%s',
+-- 				(SELECT string_agg(format('%s := %s',
+-- 					(method_parameters[j]).name,
+-- 					tmp_record[]), ',')
+-- 				FROM generate_subscripts(method_parameters, 1) AS j))
+			
+			EXECUTE format('INSERT INTO %s(method, parameters, result) VALUES (%L, %L, %s)',
+			results_table,
+			method_name,
+			best_parameter_line,
+			lowest_RMSE);	
+			
+			-- -- -- -- perform ts_method_handler_brute(results_table, time_feature, 
+-- -- -- -- 						target_column_name, ts_training_sets[tmp_integer], 
+-- -- -- -- 						tmp_numeric_array, 
+-- -- -- -- 						ts_methods_to_test[i], method_parameters);
 --		perform arima_handler(results_table, input_time_col_names[0], target_column_name, training_data_query, test_data_query);
 		END LOOP;
 	END LOOP;
