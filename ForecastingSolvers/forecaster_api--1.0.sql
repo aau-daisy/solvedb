@@ -79,9 +79,10 @@ DROP FUNCTION IF EXISTS sl_convert_ts_fit_to_solveselect(text, name, text, numer
 CREATE FUNCTION sl_convert_ts_fit_to_solveselect(time_feature text, target name, training_data text, 
 						test_values numeric[], method text, 
 						parameters sl_model_parameter_type[])
-RETURNS record AS $$
+RETURNS text AS $$
 declare
 	tmp_record record;
+	tmp_string	text;
 begin
 	execute format('SELECT * FROM (SOLVESELECT %s IN (SELECT %s) as sl_fts MINIMIZE (SELECT sl_evaluation_rmse(%L, %s(%s, time_column_name := %L, target_column_name := %L, training_data := %L, number_of_predictions := %s))::int) SUBJECTTO (SELECT %s FROM sl_fts) USING swarmops.pso(n:=100)) AS sl_tmp_tmp',
 		(SELECT string_agg(format('%s',(parameters[j]).name), ',')
@@ -105,7 +106,9 @@ begin
 			(parameters[j]).name,
 			(parameters[j]).high_range), ',')
 			FROM generate_subscripts(parameters, 1) AS j)) into tmp_record;
-	return tmp_record;
+	tmp_string := replace(tmp_record::text, '(','');
+	tmp_string := replace(tmp_string, ')', '');
+	return tmp_string;
 end;
 $$ language plpgsql;
 

@@ -276,12 +276,6 @@ BEGIN
 			target_column_name,
 			training_data_query,
 			i) into predictions;
-	
-
-	raise notice 'predictions at the end: ---%', predictions;
-	--rmse
-	raise notice 'final test values';
-	perform print_table(format('SELECT sales FROM %s', training_test->'test'));
 
  	tmp_string_array := '{}';
 -- 	-- write the predictions in the table ts_target_table if ts is the method that has been chosen, ml_target_table if ML has been chosen

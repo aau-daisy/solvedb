@@ -26,6 +26,7 @@ DECLARE
 	tmp_numeric		numeric;
 	i			int;
 	training_test		text;
+	predictions		numeric[];
 
 BEGIN
 -- 	check time arguments (if time columns are present in the table)
@@ -133,23 +134,35 @@ BEGIN
 			END LOOP;
 			-- call handler
 			-- TEST solveselect rewriting
-			execute sl_convert_ts_fit_to_solveselect(time_feature, target_column_name, 
+			
+			tmp_string := sl_convert_ts_fit_to_solveselect(time_feature, target_column_name, 
 							ts_training_sets[tmp_integer], tmp_numeric_array,
-							ts_methods_to_test[i], method_parameters) into tmp_record;
-			raise exception '%', tmp_record;
+							ts_methods_to_test[i], method_parameters);
+			tmp_string_array := string_to_array(tmp_string, ',');
 
--- 			tmp_string := format('%s',
--- 				(SELECT string_agg(format('%s := %s',
--- 					(method_parameters[j]).name,
--- 					tmp_record[]), ',')
--- 				FROM generate_subscripts(method_parameters, 1) AS j))
+ 			tmp_string := format('%s',
+				(SELECT string_agg(format('%s := %s',
+					(method_parameters[j]).name,
+					tmp_string_array[j]), ',')
+				FROM generate_subscripts(method_parameters, 1) AS j));
+
+			-- run again to get the RMSE of this model
+			EXECUTE format('SELECT %s(%s, time_column_name:=%L, target_column_name:=%L, training_data:=%L, number_of_predictions:=%s)',
+			ts_methods_to_test[i],
+			tmp_string, 
+			time_feature,
+			target_column_name,
+			('select * from ' || ts_training_sets[tmp_integer]),
+			array_length(tmp_numeric_array,1)) into predictions;
+			tmp_numeric := sl_evaluation_rmse(tmp_numeric_array, predictions);
+			
 			
 			EXECUTE format('INSERT INTO %s(method, parameters, result) VALUES (%L, %L, %s)',
 			results_table,
-			method_name,
-			best_parameter_line,
-			lowest_RMSE);	
-			
+			ts_methods_to_test[i],
+			tmp_string,
+			tmp_numeric);	
+-- 			
 			-- -- -- -- perform ts_method_handler_brute(results_table, time_feature, 
 -- -- -- -- 						target_column_name, ts_training_sets[tmp_integer], 
 -- -- -- -- 						tmp_numeric_array, 
