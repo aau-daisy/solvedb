@@ -1,5 +1,6 @@
 ﻿-- inner function managed by "predictive_solver_advisor" that 
 -- handles the execution of time series predictive models
+-- returns the names of the tables where the results have been written
 drop function if exists sl_time_series_models_handler(sl_solver_arg, 
 		 name,  text,
 		 text,  text,  text,  text, 
@@ -20,7 +21,7 @@ DECLARE
 	tmp_string		text;
 	tmp_name		name;
 	tmp_integer		integer;
-	method_parameters	sl_model_parameter_type[] := '{}';
+	method_parameters	sl_method_parameter_type[] := '{}';
 	tmp_numeric_array	numeric[] := '{}';
 	tmp_record		record;
 	tmp_numeric		numeric;
@@ -92,7 +93,8 @@ BEGIN
 				All rows have null values for the specified target.';
 		END IF;
 		ts_training_tables := ts_training_tables || tmp_name;
-	ELSE	-- FILL NULL ROWS, TODO: implement
+	-- FILL NULL ROWS, TODO: implement
+	ELSE	
 		null;
 	END IF;
 
@@ -101,7 +103,7 @@ BEGIN
 	for i in 1.. array_length(ts_training_tables, 1) LOOP
 		execute 'SELECT COUNT(*) FROM ' || ts_training_tables[i] into tmp_integer;
 		tmp_string  := sl_get_unique_tblname() || '_pr_ts_training';
-		EXECUTE format('CREATE VIEW %s AS SELECT %s,%s FROM %s LIMIT %s',
+		EXECUTE format('CREATE TEMP VIEW %s AS SELECT %s,%s FROM %s LIMIT %s',
 			tmp_string,
 			time_feature,
 			target_column_name,
@@ -109,7 +111,7 @@ BEGIN
 			((tmp_integer::numeric/100.0) * 70.0)::int);
 		ts_training_sets := ts_training_sets || tmp_string;
 		tmp_string  := sl_get_unique_tblname() || '_pr_ts_test';
-		EXECUTE format('CREATE TABLE %s AS SELECT %s,%s FROM %s OFFSET %s',
+		EXECUTE format('CREATE TEMP TABLE %s AS SELECT %s,%s FROM %s OFFSET %s',
 			tmp_string,
 			time_feature,
 			target_column_name,
@@ -126,28 +128,40 @@ BEGIN
 
 		for i in 1..array_length(ts_methods_to_test,1) LOOP
 			-- get user defined parameter to test
-			for tmp_record in execute format('select parameter_info from sl_pr_model_parameters  
-				where model_id in (select sid from sl_pr_models where predict = %L)',
+			for tmp_record in execute format('select a.name::text, type, value_default, value_min, value_max
+						from sl_pr_parameter as a
+						inner join
+						sl_pr_method_param as b
+						on a.pid = b.pid
+						where b.mid in 
+						(
+						select mid
+						from sl_pr_method
+						where funct_name = %L)',
 				ts_methods_to_test[i])
 			LOOP
-				method_parameters := method_parameters || tmp_record.parameter_info;
+				method_parameters := method_parameters || (tmp_record.name, tmp_record.type, tmp_record.value_default,
+										tmp_record.value_min, tmp_record.value_max)::sl_method_parameter_type;
 			END LOOP;
-			-- call handler
-			-- TEST solveselect rewriting
-			
+
+			--+++++++ FIT method as SOLVESELECT rewriting into optimization problem using solversw)
+			-- tmp_string contains the pairs param:=value of the trained model, to be formatted
 			tmp_string := sl_convert_ts_fit_to_solveselect(time_feature, target_column_name, 
 							ts_training_sets[tmp_integer], tmp_numeric_array,
 							ts_methods_to_test[i], method_parameters);
-			tmp_string_array := string_to_array(tmp_string, ',');
 
+
+			-- format the param:= value pairs
+			tmp_string_array := string_to_array(tmp_string, ',');
  			tmp_string := format('%s',
 				(SELECT string_agg(format('%s := %s',
 					(method_parameters[j]).name,
 					tmp_string_array[j]), ',')
 				FROM generate_subscripts(method_parameters, 1) AS j));
 
-			-- run again to get the RMSE of this model
-			EXECUTE format('SELECT %s(%s, time_column_name:=%L, target_column_name:=%L, training_data:=%L, number_of_predictions:=%s)',
+			-- run again to get the RMSE of the trained model
+			EXECUTE format('SELECT %s(%s, time_column_name:=%L, target_column_name:=%L, training_data:=%L, 
+								number_of_predictions:=%s)',
 			ts_methods_to_test[i],
 			tmp_string, 
 			time_feature,
@@ -162,19 +176,13 @@ BEGIN
 			ts_methods_to_test[i],
 			tmp_string,
 			tmp_numeric);	
--- 			
-			-- -- -- -- perform ts_method_handler_brute(results_table, time_feature, 
--- -- -- -- 						target_column_name, ts_training_sets[tmp_integer], 
--- -- -- -- 						tmp_numeric_array, 
--- -- -- -- 						ts_methods_to_test[i], method_parameters);
---		perform arima_handler(results_table, input_time_col_names[0], target_column_name, training_data_query, test_data_query);
 		END LOOP;
 	END LOOP;
 
-
-	-- execute format('insert into temp values(''{"training" : "%s", "test" : "%s"}'')',
--- 	 ts_training_tables[1], ts_target_tables[1]);
+	-- return the tables where the results of the models have been written
 	return format('{"training" : "%s", "test" : "%s"}',
 		ts_training_tables[1], ts_target_tables[1]);
 END;
 $$ language plpgsql; 
+
+

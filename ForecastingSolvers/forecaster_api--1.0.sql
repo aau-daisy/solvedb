@@ -1,54 +1,63 @@
 ﻿------ Table TO STORE PREDICTIVE MODELS
-
-create type sl_forecasting_model_type as enum(
+drop type if exists sl_pr_solver_type cascade;
+create type sl_pr_solver_type as enum(
 			'ml',
-			'ts'
+			'ts',
+			'custom'
 );
 
-DROP TYPE  IF EXISTS sl_model_parameter_type cascade;
-CREATE TYPE sl_model_parameter_type AS (
+drop table if exists sl_pr_parameter cascade;
+create table sl_pr_parameter (
+	pid		serial primary key,
+	name		name not null unique,
+	type		text,
+	description	text,
+	value_default	numeric,
+	value_min	numeric,
+	value_max	numeric
+);
+
+
+
+
+
+-- Type to contain the information of the predictive solver parameter
+DROP TYPE  IF EXISTS sl_method_parameter_type cascade;
+CREATE TYPE sl_method_parameter_type AS (
 	name		text,
 	type		text,
-	value		numeric,
-	low_range	numeric,
-	high_range	numeric,
-	accepted_values	numeric[]
+	value_default	numeric,
+	value_min	numeric,
+	value_max	numeric
 );
 
-
-
-drop table if exists sl_pr_models CASCADE;
-CREATE TABLE sl_pr_models
+drop table if exists sl_pr_method CASCADE;
+CREATE TABLE sl_pr_method
 (
-	sid		serial PRIMARY KEY,		-- the id of the predictive model
-	model		name not null unique,		-- name
-	predict		varchar(255) UNIQUE not null,		-- name of the predict method
+	mid		serial PRIMARY KEY,		-- the id of the method
+	name		name not null unique,		-- name
+	version		real,
+	funct_name	text,
 	description 	text,				-- description of the model
-	type		sl_forecasting_model_type		-- type of model: ML, or TS
+	type		sl_pr_solver_type		-- type of model: ML, or TS
 );
 
+drop table if exists sl_pr_method_param cascade;
+create table sl_pr_method_param (
+	mid int,
+	pid int,
+	foreign key (mid) references sl_pr_method(mid),
+	foreign key (pid) references sl_pr_parameter(pid)
+);
 
-drop table if exists sl_pr_model_parameters CASCADE;
-create table sl_pr_model_parameters 
+drop table if exists sl_pr_solver_method cascade;
+create table sl_pr_solver_method
 (
-	sid 		serial primary key,
-	model_id	int,
-	parameter	text not null,
-	parameter_info  sl_model_parameter_type NOT NULL,
-	description 	text,	
-	foreign key(model_id) references sl_pr_models(sid)
-);
 
-
-
-
-
-drop table if exists sl_pr_model_instances;
-create table sl_pr_model_instances 
-(
-	sid 		serial primary key,
-	model_method	text,
-	parameters 	jsonb
+	sid	int,
+	mid 	int,
+	foreign key (sid) references sl_solver(sid),
+	foreign key (mid) references sl_pr_method(mid)
 );
 
 
@@ -56,35 +65,57 @@ create table sl_pr_model_instances
 
 
 
-------------------------------- TEMPORARY TYPES FOR FORECASTING METHODS (MOVE TO TABLE IN INSTALLATION
--- This defines alternative attribute kinds in a relation with unknown variables
-DROP TYPE IF EXISTS sl_supported_ml_forecasting_methods CASCADE;
-CREATE TYPE sl_supported_ml_forecasting_methods AS ENUM (); 	
+
+-- *********UTILITY FUNCTIONS FOR FORECASTING SOLVERS *********
 
 
-DROP TYPE IF EXISTS sl_supported_ts_forecasting_methods CASCADE;
-CREATE TYPE sl_supported_ts_forecasting_methods AS ENUM ('arima'); 
+-- This function dynamically generates a solve query for predictive solvers (used when calling a specific predictive solver
+-- to generate a call to the predictive advisor with the correct predictive method
+
+-- Dynamically generates a solve select query
+CREATE OR REPLACE FUNCTION sl_pr_generate_predictive_solve_query(query sl_solve_query, par_val_pairs text[][] DEFAULT NULL::text[][])
+ RETURNS text AS $$
+  SELECT format('SOLVESELECT %s IN (%s) USING %s(%s)', 
+	    ((query.problem).cols_unknown)[1], 						 -- target column
+	    (query.problem).input_sql, 						         -- Input relation
+	    format('%s%s', query.solver_name, CASE WHEN query.method_name = '' THEN ''   -- Solver/method clause
+			           ELSE format('.%s', query.method_name)
+			      END), 				     
+	    (SELECT string_agg(CASE WHEN (par_val_pairs[i][2] IS NULL) OR (par_val_pairs[i][2] = '') 
+			THEN par_val_pairs[i][1]
+			ELSE format('%s:=%L', par_val_pairs[i][1], par_val_pairs[i][2]) END, ',') 
+	     FROM generate_subscripts(par_val_pairs, 1) AS i)	     -- Solver parameter clause
+	)		
+$$ LANGUAGE sql IMMUTABLE;
 
 
 
--- *********UTILITY FUNCTIONS FOR FORECASTING SOLVERS *********--
+
+
+
+
+
+
+
+
 
 -- This function rewrites the optimization problem of a TIME SERIES 
 --forecasting model into a SOLVESELECT,
 -- using the swarm solver to find the solution
-
-DROP FUNCTION IF EXISTS sl_convert_ts_fit_to_solveselect(text, name, text, numeric[], text, 
-							sl_model_parameter_type[]);
-
+DROP FUNCTION IF EXISTS sl_convert_ts_fit_to_solveselect(text, name, text, numeric[], text, sl_method_parameter_type[]);
 CREATE FUNCTION sl_convert_ts_fit_to_solveselect(time_feature text, target name, training_data text, 
 						test_values numeric[], method text, 
-						parameters sl_model_parameter_type[])
+						parameters sl_method_parameter_type[])
 RETURNS text AS $$
 declare
 	tmp_record record;
 	tmp_string	text;
+	n_iterations	int:=50;
 begin
-	execute format('SELECT * FROM (SOLVESELECT %s IN (SELECT %s) as sl_fts MINIMIZE (SELECT sl_evaluation_rmse(%L, %s(%s, time_column_name := %L, target_column_name := %L, training_data := %L, number_of_predictions := %s))::int) SUBJECTTO (SELECT %s FROM sl_fts) USING swarmops.pso(n:=100)) AS sl_tmp_tmp',
+	execute format('SELECT * FROM (SOLVESELECT %s IN (SELECT %s) as sl_fts 
+			MINIMIZE (SELECT sl_evaluation_rmse(%L, %s(%s, time_column_name := %L, target_column_name := %L, 
+			training_data := %L, number_of_predictions := %s))::int) 
+			SUBJECTTO (SELECT %s FROM sl_fts) USING swarmops.pso(n:=%s)) AS sl_tmp_tmp',
 		(SELECT string_agg(format('%s',(parameters[j]).name), ',')
 			FROM generate_subscripts(parameters, 1) AS j),
 		(SELECT string_agg(format('NULL::%s AS %s',
@@ -102,10 +133,11 @@ begin
 		('SELECT * FROM ' || training_data),
 		array_length(test_values,1),
 		(SELECT string_agg(format(' %s <= %s <= %s',
-			(parameters[j]).low_range,
+			(parameters[j]).value_min,
 			(parameters[j]).name,
-			(parameters[j]).high_range), ',')
-			FROM generate_subscripts(parameters, 1) AS j)) into tmp_record;
+			(parameters[j]).value_max), ',')
+			FROM generate_subscripts(parameters, 1) AS j),
+			n_iterations) into tmp_record;
 	tmp_string := replace(tmp_record::text, '(','');
 	tmp_string := replace(tmp_string, ')', '');
 	return tmp_string;
@@ -121,7 +153,7 @@ CREATE OR REPLACE FUNCTION convert_date_string(date_string text) RETURNS text
 AS $$
 	import dateutil.parser as parser
 	try:
-		return parser.parse(date_string)
+		return parser.parse(date_string)s
 	except Exception:
 		return None
 $$ LANGUAGE plpythonu;
@@ -153,22 +185,23 @@ $$ language plpythonu;
 
 
 drop function if exists separate_input_relation_on_time_range(name, name, text, int, text, text, text);
-CREATE FUNCTION separate_input_relation_on_time_range(target name, id name, time_column_name text, frequency int, table_name text, starting_time text, ending_time text) RETURNS text
+CREATE FUNCTION separate_input_relation_on_time_range(target name, id name, time_column_name text, frequency int, 
+			table_name text, starting_time text, ending_time text) RETURNS text
 AS $$
 
-	from datetime import datetime
+	import dateutil.parser as parser
 	from datetime import timedelta
 
-	starting_datetime = datetime.strptime(starting_time, '%Y-%m-%d %H:%M:%S')
-	ending_datetime = datetime.strptime(ending_time, '%Y-%m-%d %H:%M:%S')
+	starting_datetime = parser.parse(starting_time)
+	ending_datetime = parser.parse(ending_time)
 	# if the user has not specified a frequency find most probable interval between samples in time series
 	if frequency < 0:
 		query = "select " + time_column_name + " from " + table_name + " order by " + time_column_name + " desc"
 		rv = plpy.execute(query)
 		time_intervals = {}
 		for i in range(len(rv)-1):
-			time_object_a = datetime.strptime(rv[i][time_column_name], '%Y-%m-%d %H:%M:%S')
-			time_object_b = datetime.strptime(rv[i+1][time_column_name], '%Y-%m-%d %H:%M:%S')
+			time_object_a = parser.parse(rv[i][time_column_name])
+			time_object_b = parser.parse(rv[i+1][time_column_name])
 			time_intervals[(time_object_a - time_object_b).total_seconds()] = time_intervals.get((time_object_a - time_object_b).total_seconds(),0) + 1
 		probability = 0
 		for key, value in time_intervals.iteritems():
@@ -193,7 +226,7 @@ AS $$
 	times_already_in = []
 
 	for line in rv:
-		times_already_in.append(datetime.strptime(line[time_column_name], '%Y-%m-%d %H:%M:%S'))
+		times_already_in.append(parser.parse(line[time_column_name]))
 
 	lines_for_view = []
 	last_existing_line = starting_datetime
@@ -236,14 +269,6 @@ AS $$
 $$ LANGUAGE plpythonu;
 
 
-
-create function extract_fields_from_record(x record, fields text[]) returns text as $$
-
-	result = ""
-	foreach field in fields:
-		result.append(field + " := " + str(x[field]))
-	return result;
-$$ language plpythonu;
 
 
 

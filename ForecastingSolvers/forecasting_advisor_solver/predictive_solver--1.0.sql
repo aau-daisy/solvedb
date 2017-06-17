@@ -16,15 +16,6 @@ WITH
                   SELECT sid, 'advisor', 'default predictive solver', 'predictive_solver_advisor', 'predictive problem', 'Manages the generic prediction tasks' 
 		  FROM solver RETURNING mid),
 
--- Register arima methods.
- method2 AS  (INSERT INTO sl_solver_method(sid, name, name_full, func_name, prob_name, description)
-                  SELECT sid, 'arima', 'arima predictive solver', 'arima_solver', 'predictive problem', 'Solver for ARIMA forecasting model' 
-		  FROM solver RETURNING mid),	
-
--- Register feature selector solver
- method3 AS  (INSERT INTO sl_solver_method(sid, name, name_full, func_name, prob_name, description)
-                  SELECT sid, 'feature_selector', 'feature selection solver', 'f_selector_solver', 'predictive problem', 'Solver for feature selection' 
-		  FROM solver RETURNING mid),
 
 -- Register the parameters
 
@@ -60,7 +51,7 @@ WITH
                   RETURNING sid)  
 
 -- Perform the actual insert
-SELECT count(*) FROM solver, method1, method2, method3, spar2, sspar2, spar3, sspar3, spar5, sspar5, spar7, sspar7, spar8, sspar8;
+SELECT count(*) FROM solver, method1, spar2, sspar2, spar3, sspar3, spar5, sspar5, spar7, sspar7, spar8, sspar8;
 
 -- Set the default method
 UPDATE sl_solver s
@@ -70,6 +61,7 @@ WHERE (s.sid = m.sid) AND (s.name = 'predictive_solver') AND (m.name='advisor');
 
 
 --Install the solver method
+drop function if exists predictive_solver_advisor(sl_solver_arg);
 CREATE OR REPLACE FUNCTION predictive_solver_advisor(arg sl_solver_arg) RETURNS setof record AS $$
 DECLARE
      i		        	int;		-- tmp index   
@@ -81,15 +73,11 @@ DECLARE
      -- currently handles a single target column
      target_column_name 	name;
      target_column_type 	text;
-     test_joining_columns 	name[] := '{}';
-     test_not_joining_columns 	name[] := '{}';
-     t       			sl_attribute_desc;
-     v_o     			sl_viewsql_out;
-     v_d     			sl_viewsql_dst;     
-     tmp_forecasting_table_name text;
+--      t       			sl_attribute_desc;
      attMethods			text;
      ml_methods_to_test		text[] := '{}';
      ts_methods_to_test		text[] := '{}';
+     custom_methods_to_test	text[] := '{}';
      tmp_string_array 		text[] := '{}';
      attFeatures		text;
      attStartTime		text;
@@ -99,51 +87,28 @@ DECLARE
      final_ml_features		text[] = '{}';
      final_ts_features		text[] = '{}';
 	k			int = 10;
--- 	ts_training		text := sl_get_unique_tblname() || '_pr_ts_training';
--- 	ts_test			text := sl_get_unique_tblname() || '_pr_ts_test';
-	tsSplitQuery		text;
-	input_length		int;
-	ts_features		text[] := '{}';
-	ml_features		text[] := '{}';
-	timeFrequency		int := null;
-	
-	ts_target_table		name;
+-- 	ts_target_table		name;
 	test_ml_methods		boolean;
 	test_ts_methods		boolean;
+	test_custom_methods	boolean;
 	tmp_numeric		numeric;
 	tmp_numeric_array	numeric[];
 	tmp_string		text;
-	
-	ts_training_table	name;
-	method 			VARCHAR[];
-	row_data		sl_pr_model_parameters%ROWTYPE;
+-- 	method 			VARCHAR[];
 	training_data_query 	text;
-	test_data_query		text;
 	tmp_record		record;
 	results_table		text := sl_build_pr_results_table();
 	chosen_method		text;
 
 	-- for testing only
-	model_parameter_name	text[];
-	model_parameter_value	numeric;
-	model_parameter_low	numeric;
-	model_parameter_high	numeric;
-	model_parameter_type	text[];
-	model_parameter_accepted_values numeric[];
-	tmp_jsonb		jsonb;
 	predictions		numeric[];
-	model_fit_result	numeric[];
 	training_test		jsonb;		--temporary containers for result tables (use GD)
 	ml_training_test	jsonb;	
      
 BEGIN       
-
-	PERFORM sl_create_view(sl_build_out(arg), input_table_tmp_name); 
-	
-
 	--------//////     	SETUP		////-------------------------------
-
-
+	
+	PERFORM sl_create_view(sl_build_out(arg), input_table_tmp_name); 
 	PERFORM sl_set_print_model_summary_off();
 	
      -- Check if the arguments are given and table format are correct
@@ -161,32 +126,31 @@ BEGIN
 	
 	-- check the ensamble of forecasting methods to test (from input or default)
 	IF attMethods is null THEN
-		for tmp_record in select * from sl_pr_models loop
+		for tmp_record in select * from sl_pr_method loop
 			if tmp_record.type = 'ts' then
-				ts_methods_to_test := ts_methods_to_test || tmp_record.predict::text;
-				test_ts_methods := True;
-			else
-				ml_methods_to_test := ml_methods_to_test || tmp_record.predict::text;
-				test_ml_methods := True;
+				ts_methods_to_test := ts_methods_to_test || tmp_record.funct_name::text;
+			elsif tmp_record.type = 'ml' then
+				ml_methods_to_test := ml_methods_to_test || tmp_record.funct_name::text;
+			elsif tmp_record.type = 'custom' then
+				custom_methods_to_test := custom_methods_to_test || tmp_record.funct_name::text;
 			end if;
 		end loop;
 	ELSE
 		tmp_string_array := string_to_array(attMethods, ',');
 		for i in 1..array_length(tmp_string_array,1) LOOP
-			IF coalesce((select tmp_string_array[i] = any (enum_range(null::sl_supported_ml_forecasting_methods)::text[])), false) then
-				ml_methods_to_test := ml_methods_to_test || tmp_string_array[i];
-			ELSIF coalesce((select tmp_string_array[i] = any (enum_range(null::sl_supported_ts_forecasting_methods)::text[])), false) then
-				ts_methods_to_test := ts_methods_to_test || tmp_string_array[i];
-			ELSE
-				raise exception 'The method "%" is not supported. The currently supported methods are: %, %',
-				 tmp_string_array[i], enum_range(null::sl_supported_ml_forecasting_methods)::text[], 
-				 enum_range(null::sl_supported_ts_forecasting_methods)::text[];
-			END IF;
+			execute format('select type::text from sl_pr_method where funct_name = %L',
+					tmp_string_array[i]) into tmp_string;
+			CASE 
+				WHEN tmp_string = 'ts' then
+					ts_methods_to_test := ts_methods_to_test || tmp_string_array[i];
+				WHEN tmp_string = 'ml' then
+					ml_methods_to_test := ml_methods_to_test || tmp_string_array[i];
+				WHEN tmp_string = 'custom' then
+					custom_methods_to_test := custom_methods_to_test || tmp_string_array[i];
+				ELSE 
+			END CASE;
 		END LOOP;
 	END IF;
-
-
-	
 
 	-- control that sets if to test ML/TS
 	IF array_length(ml_methods_to_test, 1) > 0 THEN
@@ -195,6 +159,10 @@ BEGIN
 	IF array_length(ts_methods_to_test, 1) > 0 THEN
 		test_ts_methods := True;
 	END IF;
+	IF array_length(custom_methods_to_test, 1) > 0 THEN
+		test_custom_methods := True;
+	END IF;
+
 	
 	-- separates columns in target, time columns and feature columns
 	for input_clmn in select att_name, att_type, att_kind from  sl_get_attributes_from_sql('select * from ' || input_table_tmp_name || ' limit 1')
@@ -241,7 +209,6 @@ BEGIN
 
 
 ---------------------------------------- ////// END SETUP	---------------------------------------------------------
-
 	if test_ts_methods THEN
 		select sl_time_series_models_handler(arg, target_column_name, target_column_type, attStartTime, 
 			attEndTime, attFrequency, final_ts_features[0], input_table_tmp_name, 
@@ -278,7 +245,7 @@ BEGIN
 			i) into predictions;
 
  	tmp_string_array := '{}';
--- 	-- write the predictions in the table ts_target_table if ts is the method that has been chosen, ml_target_table if ML has been chosen
+-- 	Write the predictions in the table final table
 	for tmp_record in EXECUTE format('SELECT %s as t FROM %s ORDER BY %s ASC', 
 		input_time_col_names[0],
 		training_test->'test',
