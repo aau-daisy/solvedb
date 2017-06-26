@@ -17,12 +17,9 @@ DECLARE
 BEGIN
 
 	-- get arg information
--- 	execute format('select name from stustuf',
--- 			(arg).solver_name) into method;
 	query := ((arg).problem, 'predictive_solver'::name, '');
 
 	for i in 1..array_length((arg).params, 1) loop
--- 		par_val_pairs := array_append(par_val_pairs, array[((arg).params)[i].param::text, ((arg).params)[i].value_t::text]);
 		par_val_pairs := par_val_pairs || array[[((arg).params)[i].param::text, ((arg).params)[i].value_t::text]];
 	end loop;
 	par_val_pairs := par_val_pairs || array[['methods'::text, method::text]];

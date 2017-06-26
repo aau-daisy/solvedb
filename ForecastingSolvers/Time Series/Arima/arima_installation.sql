@@ -85,18 +85,3 @@ UPDATE sl_solver s
 SET default_method_id = mid
 FROM sl_solver_method m
 WHERE (s.sid = m.sid) AND (s.name = 'arima_solver') AND (m.name='arima');
-
-
-
-
--- OLD installation
--- insert into sl_pr_models(model, predict, type) values
--- ('arima_statsmodels', 'arima_predict', 'ts');
--- 
--- insert into sl_pr_model_parameters(model_id, parameter, parameter_info, description) values 
--- (1, 'time_window', ('time_window', 'integer', null, 5, 100, null), 'percentage of data to use for fitting the model, starting from the end'),
--- (1, 'p', ('p', 'integer', null, 0, 5, null), 'AR parameter'),
--- (1, 'd', ('d', 'integer', null, 0, 2, null), 'I parameter'),
--- (1, 'q', ('q', 'integer', null, 0, 5, null), 'MA parameter');
--- 
--- select * from sl_pr_model_parameters

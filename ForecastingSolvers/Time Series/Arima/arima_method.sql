@@ -15,6 +15,7 @@ AS $$
 	from math import sqrt
 	import math
 	from pandas import DataFrame
+	import dateutil.parser as parser
 
 	
 	training_time	= []
@@ -23,7 +24,7 @@ AS $$
 	rv = plpy.execute(training_data)
 	for x in rv:
 		training_target.append(x[target_column_name])
-		training_time.append(datetime.strptime(x[time_column_name], '%Y-%m-%d %H:%M:%S'));
+		training_time.append(parser.parse(x[time_column_name]));
 
 	
 	x_train = np.array(training_time)

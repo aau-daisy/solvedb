@@ -110,7 +110,7 @@ RETURNS text AS $$
 declare
 	tmp_record record;
 	tmp_string	text;
-	n_iterations	int:=50;
+	n_iterations	int:=100;
 begin
 	execute format('SELECT * FROM (SOLVESELECT %s IN (SELECT %s) as sl_fts 
 			MINIMIZE (SELECT sl_evaluation_rmse(%L, %s(%s, time_column_name := %L, target_column_name := %L, 
@@ -213,6 +213,8 @@ AS $$
 
 	number_of_rows_to_fill = int((ending_datetime - starting_datetime).total_seconds() / float(most_probable_frequency))
 
+	if number_of_rows_to_fill < 1:
+		plpy.exception("Wrong time interval for prediction");
 	rv = plpy.execute("select count(*) as the_count from (select " + time_column_name + " from "  + table_name + " where " + time_column_name + " >= \'" + str(starting_datetime) + "\' and " + time_column_name + " <= \'" + str(ending_datetime) + "\' order by " + time_column_name + " asc) as b")
 	number_of_rows_to_fill_already_in_table = int(rv[0]['the_count'])
 	

@@ -127,6 +127,7 @@ BEGIN
 
 
 		for i in 1..array_length(ts_methods_to_test,1) LOOP
+			raise notice 'Training: %', ts_methods_to_test[i];
 			-- get user defined parameter to test
 			for tmp_record in execute format('select a.name::text, type, value_default, value_min, value_max
 						from sl_pr_parameter as a
