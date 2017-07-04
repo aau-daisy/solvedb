@@ -959,13 +959,6 @@ CREATE OR REPLACE FUNCTION sl_get_solverhelp(solver_name name DEFAULT NULL, meth
  END;
 $$ LANGUAGE plpgsql STABLE;
 
-
--- Expands and pre-process the problem for solving or future processing
-CREATE OR REPLACE FUNCTION sl_expand_problem(problem sl_problem, input_atts sl_attribute_desc[] DEFAULT NULL) RETURNS sl_problem AS $$	
-    SELECT sl_inline_CTE_problems(sl_expand_asterisk_columns(problem, input_atts))
- $$ LANGUAGE SQL STABLE;
-
-
 /* This function expands the asterisk (*) culumns in the input relation */
 CREATE OR REPLACE FUNCTION sl_expand_asterisk_columns(problem sl_problem, input_atts sl_attribute_desc[] DEFAULT NULL) RETURNS sl_problem AS $$
 BEGIN 
@@ -984,7 +977,6 @@ BEGIN
 	 RETURN problem;
 END	 
 $$ LANGUAGE plpgsql STABLE;
-
 
 
 -- Inline the sub-problems, when specified in the given CTEs
@@ -1100,6 +1092,11 @@ CREATE OR REPLACE FUNCTION sl_inline_CTE_problems(problem sl_problem) RETURNS sl
 
  END; 
 $$ LANGUAGE plpgsql STABLE;
+
+-- Expands and pre-process the problem for solving or future processing
+CREATE OR REPLACE FUNCTION sl_expand_problem(problem sl_problem, input_atts sl_attribute_desc[] DEFAULT NULL) RETURNS sl_problem AS $$	
+    SELECT sl_inline_CTE_problems(sl_expand_asterisk_columns(problem, input_atts))
+ $$ LANGUAGE SQL STABLE;
 
 
 -- Rework the problem to eliminate CTEs with decision variables:
