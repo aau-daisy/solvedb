@@ -59,8 +59,8 @@ CREATE TYPE sl_problem AS
 	obj_dir 	sl_obj_dir,	  -- The direction of objective function
 	obj_sql		text,		  -- The SQL statement defining objective function
 	ctr_sql		text[],		  -- A list of SQL statements defining constraints/inequalities
-	inlines		sl_CTE_relation[],-- Common Table Expressions used for problem inclusion, if any
-	ctes		sl_CTE_relation[] -- Common Table Expressions used, if any
+	ctes		sl_CTE_relation[],-- Common Table Expressions used, if any
+	inlines		sl_CTE_relation[] -- Common Table Expressions used for problem inclusion
 );
 
 -- A type to define a solve query. To be used when invoking SOLVE statement
@@ -191,12 +191,6 @@ CREATE OR REPLACE FUNCTION sl_get_attributes_from_sql(text) RETURNS SETOF sl_att
 AS 'MODULE_PATHNAME'
 LANGUAGE C STABLE STRICT;
 
--- Gets a set of tables used in an SQL query.
--- It is expensive as it parses a SQL query internally 
-CREATE OR REPLACE FUNCTION sl_get_tables_from_sql(text) RETURNS SETOF text
-AS 'MODULE_PATHNAME'
-LANGUAGE C STABLE STRICT;
-
 -- A dummy "non-solving" solver written in C to test the SolverAPI routines
 CREATE OR REPLACE FUNCTION sl_dummy_solve(sl_solver_arg) RETURNS SETOF record
 AS 'MODULE_PATHNAME'
@@ -250,38 +244,12 @@ CREATE OR REPLACE FUNCTION sl_param_get_as_text(arg sl_solver_arg, parname name)
 	WHERE (s.p).param = parname;
 $$ LANGUAGE SQL STABLE STRICT;
 
--- Create a fixed view or solver parameters
-CREATE OR REPLACE FUNCTION sl_create_paramview(arg sl_solver_arg, viewname name) RETURNS boolean AS $$
- BEGIN
-   EXECUTE format('CREATE TEMP VIEW %s AS SELECT * FROM (VALUES %s) AS v(pid, param, value_i, value_f, value_t)', quote_ident(viewname), 
-   (SELECT string_agg(format('(%s, %s, %s, %s, %s)', 
-                        pid, quote_nullable((arg.params[pid]).param), quote_nullable((arg.params[pid]).value_i), 
-                        quote_nullable((arg.params[pid]).value_f), quote_nullable((arg.params[pid]).value_t)), ',')
-    FROM generate_subscripts(arg.params, 1) AS pid));
-   RETURN TRUE;
- END   
-$$ LANGUAGE plpgsql VOLATILE STRICT;
-
--- ************************* Problem manipulation functions and operators *************************************************
-
--- Dynamically generates a solve select query (reverses the sl_problem)
+-- Dynamically generates a solve select query
 CREATE OR REPLACE FUNCTION sl_generate_solve_query(query sl_solve_query, par_val_pairs text[][] DEFAULT NULL::text[][]) RETURNS text AS $$
-  SELECT format('SOLVESELECT %s IN (%s) AS %s %s %s %s %s USING %s(%s)', 
+  SELECT format('SOLVESELECT %s IN (%s) AS %s %s %s %s USING %s(%s)', 
 	    (SELECT string_agg(c, ',') FROM unnest((query.problem).cols_unknown) AS c),  -- Unknown attribute list
 	    (query.problem).input_sql, 						     -- Input relation
 	    (query.problem).input_alias,						     -- Input relation alias
-	    CASE WHEN array_length((query.problem).inlines, 1) > 0 			     -- Inline clause
-	         THEN format('INLINE %s', 
-		  (SELECT string_agg(format('%s (%s) AS %s',
-		    (CASE WHEN array_length(c.cols_unknown, 1) > 0
-		          THEN format('%s IN', (SELECT string_agg(u, ',') FROM unnest(c.cols_unknown) AS u))
-		          ELSE ''
-		     END),
-		     c.input_sql,
-		     c.input_alias), ',') 
-		   FROM unnest((query.problem).inlines) AS c))
-	         ELSE ''
-	    END,	    
 	    CASE WHEN array_length((query.problem).ctes, 1) > 0 			     -- CTE clause
 	         THEN format('WITH %s', 
 		  (SELECT string_agg(format('%s (%s) AS %s',
@@ -316,71 +284,17 @@ CREATE OR REPLACE FUNCTION sl_generate_solve_query(query sl_solve_query, par_val
                 )
 $$ LANGUAGE sql IMMUTABLE;
 
--- An alternative SOLVESELECT generation function, for sl_solve_query
-CREATE OR REPLACE FUNCTION sl_generate_solve_query(query sl_solve_query) RETURNS text AS $$
-SELECT sl_generate_solve_query(query, NULL::text[][])
-$$ LANGUAGE sql;
-
--- A SOLVESELECT generation function, for sl_problem
-CREATE OR REPLACE FUNCTION sl_generate_solve_query(problem sl_problem) RETURNS text AS $$
-SELECT sl_generate_solve_query(ROW(problem, '', '')::sl_solve_query, NULL::text[][])
-$$ LANGUAGE sql;
-
--- Create implicit casts from sl_solve_query and sl_problem to text
-CREATE CAST (sl_solve_query AS text) WITH FUNCTION sl_generate_solve_query(sl_solve_query) AS IMPLICIT;
-CREATE CAST (sl_problem AS text) WITH FUNCTION sl_generate_solve_query(sl_problem) AS IMPLICIT;
-
--- N/A This function executes the model - either by running SOLVESELECT or SELECT depending on if there're decision variables
-CREATE OR REPLACE FUNCTION sl_execute(problem sl_problem) RETURNS SETOF RECORD AS $$ 
- BEGIN 	
- END;
-$$ LANGUAGE plpgsql;
-
--- This function merges two problems by overriding input, objective fn, constrainsts in targer problem, replacing with those from the source 
-CREATE OR REPLACE FUNCTION sl_problem_merge(prob_to sl_problem, prob_from sl_problem) returns sl_problem AS $$
-DECLARE 
- pt 		sl_problem;
- pf 		sl_problem;
- cte		sl_CTE_relation;
-BEGIN
-  -- Expand the problems, * and inlines
-  pt = sl_expand_problem(prob_to);
-  pf = sl_expand_problem(prob_from);
-
-  -- Iterate through all CTEs (and input relation) to import
-  FOREACH cte IN (SELECT ROW(pf.input_sql, pf.input_alias, pf.cols_unknown)::sl_CTE_relation
-                  UNION ALL
-                  SELECT ctes FROM pf) LOOP
-
-END LOOP
-		  
-
-  --Check if the input relation columns match   
-  IF (EXISTS(SELECT * FROM sl_get_attributes_from_sql(pt.input_sql) AS s1
-  		           LEFT OUTER JOIN sl_get_attributes_from_sql(pf.input_sql) AS s2 
-  		           ON (s1.att_name =s2.att_name) AND (s1.att_type = s2.att_type)
-               WHERE s2.att_name IS NULL)) THEN
-       RAISE EXCEPTION 'The source problem has a fewer or incompatible columns to be merged with the target problem!';
-  END IF;
-
-  -- Check if some overlapping CTEs exists 
-  IF (EXISTS(SELECT *
-             FROM unnest(pt.ctes) AS ct INNER JOIN  
-                  unnest(pf.ctes) AS cf ON pt.input_alias = pf.input_alias)) THEN 
-      RAISE EXCEPTION 'The source and the target problems have overlapping CTEs !';
-  END IF;                  
-
-  RETURN ROW(pf.input_sql, 
-             pt.input_alias, 
-             pf.cols_unknown, 
-             CASE pf.obj_dir WHEN 'undefined' THEN pt.obj_dir ELSE pf.obj_dir END,
-             CASE pf.obj_dir WHEN 'undefined' THEN pt.obj_sql ELSE pf.obj_sql END,
-             pt.ctr_sql || pf.ctr_sql,
-             pt.inlines || pf.inlines,
-             pt.ctes    || pf.ctes)::sl_problem;  
-END		
-$$ LANGUAGE plpgsql STRICT;
-CREATE OPERATOR << (LEFTARG = sl_problem, RIGHTARG = sl_problem, PROCEDURE = sl_problem_merge);
+-- Create a fixed view or solver parameters
+CREATE OR REPLACE FUNCTION sl_create_paramview(arg sl_solver_arg, viewname name) RETURNS boolean AS $$
+ BEGIN
+   EXECUTE format('CREATE TEMP VIEW %s AS SELECT * FROM (VALUES %s) AS v(pid, param, value_i, value_f, value_t)', quote_ident(viewname), 
+   (SELECT string_agg(format('(%s, %s, %s, %s, %s)', 
+                        pid, quote_nullable((arg.params[pid]).param), quote_nullable((arg.params[pid]).value_i), 
+                        quote_nullable((arg.params[pid]).value_f), quote_nullable((arg.params[pid]).value_t)), ',')
+    FROM generate_subscripts(arg.params, 1) AS pid));
+   RETURN TRUE;
+ END   
+$$ LANGUAGE plpgsql VOLATILE STRICT;
 
 -- **************** All sorts of dynamic query (ViewSQL) generating/manipulation functions ********************************
 
@@ -754,12 +668,7 @@ $$ LANGUAGE SQL IMMUTABLE STRICT;
 
 -- Get attributes of a CTE expression
 CREATE OR REPLACE FUNCTION sl_get_CTEattributes(problem sl_problem, cte_alias text) RETURNS SETOF sl_attribute_desc AS $$
-SELECT sl_get_attributes_from_sql(format('%s SELECT * FROM %s', sl_get_dst_prequery(problem, ROW(problem.input_sql)::sl_viewsql_out), quote_ident(cte_alias)))
-$$ LANGUAGE SQL STABLE STRICT;
-
--- Get dependent RTEs of a CTE expression
-CREATE OR REPLACE FUNCTION sl_get_CTEtables(problem sl_problem, cte_alias text) RETURNS SETOF text AS $$
-SELECT sl_get_tables_from_sql(format('%s SELECT * FROM %s', sl_get_dst_prequery(problem, ROW(problem.input_sql)::sl_viewsql_out), quote_ident(cte_alias)))
+SELECT sl_get_attributes_from_sql(format('%s SELECT * FROM %s', sl_get_dst_prequery(problem, ROW(problem.input_sql)::sl_viewsql_out), cte_alias))
 $$ LANGUAGE SQL STABLE STRICT;
 
 -- This is the main solver output routine. It uses output-level view SQL and it generates an 
@@ -979,159 +888,42 @@ CREATE OR REPLACE FUNCTION sl_get_solverhelp(solver_name name DEFAULT NULL, meth
  END;
 $$ LANGUAGE plpgsql STABLE;
 
-/* This function expands the asterisk (*) culumns in the input relation */
-CREATE OR REPLACE FUNCTION sl_expand_asterisk_columns(problem sl_problem, input_atts sl_attribute_desc[] DEFAULT NULL) RETURNS sl_problem AS $$
-BEGIN 
-
-	 -- Expand "*" expression in the decision column list
-	 IF EXISTS(SELECT * FROM unnest((problem).cols_unknown) AS n WHERE n = '*')  THEN
-
-		-- Generate input_attrs 
-		IF (input_atts IS NULL) THEN 
-
-			 SELECT array_agg(A::sl_attribute_desc) 
-			 FROM sl_get_attributes_from_sql((problem).input_sql) as A 
-			 INTO input_atts;	
-		END IF;	  
-	 
-		problem.cols_unknown = (SELECT array_agg(a.att_name) FROM unnest(input_atts) AS a);			
-	 END IF;
-
-	 RETURN problem;
-END	 
-$$ LANGUAGE plpgsql STABLE;
-
 
 -- Inline the sub-problems, when specified in the given CTEs
 CREATE OR REPLACE FUNCTION sl_inline_CTE_problems(problem sl_problem) RETURNS sl_problem AS $$	
  DECLARE
-   -- Attribute specification of an inline CTE
-   inline       		sl_CTE_relation;
-   inline_cols			sl_attribute_desc[]; 
-   inline_pattnames		text[];
-   c				int;
-   cnr				int;
-   cnames			name[];
+   -- Attribute specification of a CTE
+   cte       		sl_CTE_relation;
+   cte_cols		sl_attribute_desc[]; 
+   c			int;
    
-   -- The extracted sub-problem
-   sub_problem 		sl_problem;   
-   
-   -- Rewriting dump
-   ncte			sl_CTE_relation;
-   cte_prefix		text;  
-   cte_rtes		text;  
-   pre_query		text;  
-   new_ctes  		sl_CTE_relation[]; 
-   new_ctrs		text[];
+   sub_problem sl_problem;     
  BEGIN
-   -- Initialize 
-   new_ctes = ARRAY[]::sl_CTE_relation[];
-   new_ctrs = ARRAY[]::text[]; 
-   
    -- Search for CTEs returning a "sl_problem"
-   FOREACH inline IN ARRAY problem.inlines LOOP   
+   FOREACH cte IN ARRAY problem.ctes LOOP   
    
-	-- Retrieve all attributes of type "sl_problem"
-	SELECT array_agg(c.att_name) INTO inline_pattnames
-	FROM sl_get_attributes_from_sql(format('WITH %s AS (%s) %s', quote_ident(problem.input_alias), problem.input_sql, inline.input_sql)) AS c
+	-- Count the number of "sl_problem" attributes
+	
+	SELECT count(*) INTO c
+	FROM sl_get_CTEattributes(problem, cte.input_alias) AS c 
 	WHERE c.att_type = 'sl_problem'; 
 
-	/* Count the number of comlumns */
-	c = array_length(inline_pattnames, 1);
-
 	-- Verify that only 1 is specified.
-	IF (inline_pattnames IS NULL) OR (c=0) THEN
-		RAISE EXCEPTION 'No problem specification of the type "sl_problem" was selected using the INLINE clause!';	
-	ELSIF (c > 1) THEN
-		RAISE EXCEPTION 'Only 1 sub-problem can be included using the INLINE clause!';		
-	ELSIF (c=1) THEN
-	
-		-- Note down the CTE name 
-		cte_prefix = inline.input_alias || '_';
+	IF (c>1) THEN
+		RAISE EXCEPTION 'Only 1 sub-problem can be included in a single WITH statement!';	
+	ELSE IF (c=1) THEN
 
-		-- Setup a temp view for the input relation
-		EXECUTE format('CREATE TEMP VIEW %s AS (%s)', quote_ident(problem.input_alias), problem.input_sql);
-		
 		-- Extract the sl_problem instance
-		EXECUTE format('SELECT (%s).* FROM (%s) AS s', quote_ident(inline_pattnames[1]), inline.input_sql) INTO sub_problem;
+		EXECUTE '%s SELECT * FROM %s' INTO sub_problem USING sl_get_dst_prequery(problem, ROW(problem.input_sql)::sl_viewsql_out), cte_alias;
 
-
-		-- Make checks of the sub-problem
-		IF (sub_problem IS NULL) THEN
-			RAISE EXCEPTION 'Returned sub-problem is NULL in the INLINE clause!';			
-		END IF;
-
-		-- Recursivelly apply inlining to the sub-problem
-		sub_problem = sl_inline_CTE_problems(sl_expand_asterisk_columns(sub_problem));
-
-		-- Check if the requested decision columns are actually decision columns in the sub-prlblem
-		IF (COALESCE(inline.cols_unknown = '{}', true) OR (EXISTS(SELECT * FROM unnest(inline.cols_unknown) AS c(n) WHERE n='*'))) THEN
-			inline.cols_unknown = sub_problem.cols_unknown;
-		ELSE
-			SELECT array_agg(i.c) INTO cnames
-			FROM unnest(inline.cols_unknown) AS i(c) LEFT OUTER JOIN unnest(sub_problem.cols_unknown) AS s(c) ON i.c = s.c
-			WHERE s.c IS NULL;
-
-			IF (array_length(cnames, 1) > 0) THEN
-				RAISE EXCEPTION 'The column(-s) % cannot be found in in the decision variable columns (%) of the subproblem!', cnames, sub_problem.cols_unknown;
-			END IF;
-		END IF;		
-
-		-- Generate the CTE for the sub-problem input relation
-		new_ctes = array_append(new_ctes, ROW(sub_problem.input_sql, cte_prefix || sub_problem.input_alias, sub_problem.cols_unknown)::sl_CTE_relation);
-		-- Generate CTEs for the sub-problem CTEs
-		FOR cnr in 1..array_length(sub_problem.ctes, 1) LOOP   			
-			ncte = sub_problem.ctes[cnr];
-			
-			-- Generate the relation renaming query
-			pre_query = (SELECT format('WITH %s AS (SELECT * FROM %s)%s', quote_ident(sub_problem.input_alias), quote_ident(cte_prefix || sub_problem.input_alias),
-				    (SELECT string_agg(format(', %s AS (SELECT * FROM %s)', quote_ident((sub_problem.ctes[s]).input_alias), quote_ident(cte_prefix || (sub_problem.ctes[s]).input_alias)), '') 
-				     FROM generate_subscripts(sub_problem.ctes, 1) as s
-				     WHERE s < cnr
-				    ))::text);
-			
-			new_ctes = array_append(new_ctes, ROW(format('%s SELECT * FROM (%s) AS s', pre_query, ncte.input_sql), cte_prefix || ncte.input_alias, ncte.cols_unknown)::sl_CTE_relation);		
-		END LOOP;
-
-		-- Drop the view
-		EXECUTE format('DROP VIEW %s', quote_ident(problem.input_alias));
-		
-		-- Finally, add the CTE for the input relation projection
-		new_ctes = array_append(new_ctes, ROW(format('SELECT * FROM %s', (cte_prefix || sub_problem.input_alias)), inline.input_alias, ARRAY[]::name[])::sl_CTE_relation);
-					
-		/* new_ctes = array_append(new_ctes, ROW(format('SELECT %s FROM %s', 
-					(SELECT string_agg(col, ',') FROM unnest(inline.cols_unknown) AS col),  -- Unknown attribute list
-					(cte_prefix || sub_problem.input_alias)), inline.input_alias, ARRAY[]::name[])::sl_CTE_relation);*/
-
-		-- Now, patch and add the constraints
-		-- Generate the relation renaming query
-		pre_query = (SELECT format('WITH %s AS (SELECT * FROM %s)%s', quote_ident(sub_problem.input_alias), quote_ident(cte_prefix || sub_problem.input_alias),
-			    (SELECT string_agg(format(', %s AS (SELECT * FROM %s)', quote_ident(c.input_alias), quote_ident(cte_prefix || c.input_alias)), '') 
-			     FROM unnest(sub_problem.ctes) as c ))::text);
-
-		/* Appends new contraints */
-		new_ctrs = array_cat(new_ctrs, (SELECT array_agg(format('%s SELECT * FROM (%s) AS s', pre_query, ctr))
-					        FROM unnest(sub_problem.ctr_sql) AS c(ctr)));
-		
-	END IF;	
+		RAISE NOTICE 'Bla bla bla! %s', sub_problem;
+	END IF;
+	
    END LOOP; 
-
-   /* Remove all inlinces */ 
-   problem.inlines = ARRAY[]::sl_CTE_relation[];
-   /* Update CTEs */
-   problem.ctes    =  array_cat(new_ctes, problem.ctes);
-   /* Appends new constraints */
-   problem.ctr_sql = array_cat(new_ctrs, problem.ctr_sql);
    
    RETURN problem;
-
  END; 
-$$ LANGUAGE plpgsql STRICT VOLATILE;
-
--- Expands and pre-process the problem for solving or future processing
-CREATE OR REPLACE FUNCTION sl_expand_problem(problem sl_problem, input_atts sl_attribute_desc[] DEFAULT NULL) RETURNS sl_problem AS $$	
-    SELECT sl_inline_CTE_problems(sl_expand_asterisk_columns(problem, input_atts))
- $$ LANGUAGE SQL STABLE;
+$$ LANGUAGE plpgsql STABLE;
 
 
 -- Rework the problem to eliminate CTEs with decision variables:
@@ -1230,7 +1022,6 @@ CREATE OR REPLACE FUNCTION sl_rework_CTEs(problem sl_problem) RETURNS sl_problem
    new_prb.obj_sql = problem.obj_sql;
    new_prb.ctr_sql = problem.ctr_sql;
    new_prb.ctes = new_ctes;
-   new_prb.inlines = problem.inlines;
 
    -- Generate new CTEs that have no unknown variables     
    RETURN new_prb;
@@ -1388,15 +1179,20 @@ BEGIN
 	 FROM sl_get_attributes_from_sql((query.problem).input_sql) as A 
 	 INTO return_atts;	 
 
-	 -- Expand "*" expression in the decision column list, and inlines all sub-problems
-	 query.problem = sl_expand_problem(query.problem, return_atts);
+	 -- Expand "*" expression in the decision column list
+	 IF EXISTS(SELECT * FROM unnest((query.problem).cols_unknown) AS n WHERE n = '*')  THEN
+		DECLARE 				
+			prob        sl_problem; 
+		BEGIN
+			prob = query.problem;
+			prob.cols_unknown = (SELECT array_agg(a.att_name) FROM unnest(return_atts) AS a);
+			query.problem = prob;
+		END;
+	 END IF;
 
 	 -- Rework the problem, to eliminate CTEs with decision variables
 	 IF COALESCE(m_row.auto_rewrite_ctes, false) THEN 
-
-		 RAISE NOTICE '%', query.problem::text;
-		 		
-		 sarg.problem = sl_rework_CTEs(query.problem);	 
+		 sarg.problem = sl_rework_CTEs(sl_inline_CTE_problems(query.problem));	 
 		 
 		 -- Statically analyze the attributes of input SQL -- after the transformation
 		 SELECT array_agg(A::sl_attribute_desc) 

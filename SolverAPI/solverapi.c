@@ -101,6 +101,60 @@ Datum sl_get_attributes_from_sql(PG_FUNCTION_ARGS) {
 }
 
 /*
+ * Function parses SQL statement passed as argument 0,
+ * and outputs a setof range table names used
+ */
+PG_FUNCTION_INFO_V1(sl_get_tables_from_sql);
+Datum sl_get_tables_from_sql(PG_FUNCTION_ARGS) {
+	FuncCallContext *funcctx;
+	int call_cntr;
+	int max_calls;
+
+	/* stuff done only on the first call of the function */
+	if (SRF_IS_FIRSTCALL()) {
+		MemoryContext oldcontext;
+		text * sql;
+		List * l;
+
+		/* create a function context for cross-call persistence */
+		funcctx = SRF_FIRSTCALL_INIT();
+
+		/* switch to memory context appropriate for multiple function calls */
+		oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
+
+		/* Build a list of attributes */
+		sql = PG_GETARG_TEXT_PP(0);
+		l = sl_get_query_rangeTables(text_to_cstring(sql));
+		funcctx->user_fctx = (void *) l;
+		PG_FREE_IF_COPY(sql,0);
+
+		funcctx->max_calls = list_length(l);
+
+		MemoryContextSwitchTo(oldcontext);
+	}
+
+	/* stuff done on every call of the function */
+	funcctx = SRF_PERCALL_SETUP();
+
+	call_cntr = funcctx->call_cntr;
+	max_calls = funcctx->max_calls;
+
+	if (call_cntr < max_calls) /* do when there is more left to send */
+	{
+		List * l = (List *) funcctx->user_fctx;
+		text *item;
+
+		item = cstring_to_text(list_nth(l, call_cntr));
+
+		SRF_RETURN_NEXT(funcctx, PointerGetDatum(item));
+	} else /* do when there is no more left */
+	{
+		SRF_RETURN_DONE(funcctx);
+	}
+	return 0; /* To make a compiler quiet*/
+}
+
+/*
  * A solver method to test the solver API routines. It does not solve anything, just
  * outputs the unchanged input relation.
  */

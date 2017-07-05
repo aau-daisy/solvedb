@@ -12,6 +12,8 @@
 #include "libsolverapi.h"
 
 Datum sl_get_attributes_from_sql(PG_FUNCTION_ARGS);
+Datum sl_get_tables_from_sql(PG_FUNCTION_ARGS);
+
 Datum sl_dummy_solve(PG_FUNCTION_ARGS);
 /* The function is used to create TMP table in security-restricted environment in PostgreSQL 9.3.1.
  * Hope this will not be needed in later DBMS editions */
