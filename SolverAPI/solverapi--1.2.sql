@@ -331,10 +331,14 @@ CREATE CAST (sl_solve_query AS text) WITH FUNCTION sl_generate_solve_query(sl_so
 CREATE CAST (sl_problem AS text) WITH FUNCTION sl_generate_solve_query(sl_problem) AS IMPLICIT;
 
 -- N/A This function executes the model - either by running SOLVESELECT or SELECT depending on if there're decision variables
-CREATE OR REPLACE FUNCTION sl_execute(problem sl_problem) RETURNS SETOF RECORD AS $$ 
+CREATE OR REPLACE FUNCTION sl_execute(problem sl_problem, query text) RETURNS SETOF RECORD AS $$ 
  BEGIN 	
+	RETURN QUERY EXECUTE format('%s SELECT * FROM (%s) AS s', sl_get_dst_prequery(problem), query);				
  END;
 $$ LANGUAGE plpgsql;
+CREATE OPERATOR >> (LEFTARG = sl_problem, RIGHTARG = text, PROCEDURE = sl_execute);
+
+
 
 -- This function merges two problems by overriding input, objective fn, constrainsts in targer problem, replacing with those from the source 
 CREATE OR REPLACE FUNCTION sl_problem_merge(prob_to sl_problem, prob_from sl_problem) returns sl_problem AS $$
@@ -342,42 +346,62 @@ DECLARE
  pt 		sl_problem;
  pf 		sl_problem;
  cte		sl_CTE_relation;
+ newInput	sl_CTE_relation;
+ newCTEs	sl_CTE_relation[]; 
+ id		int;
 BEGIN
   -- Expand the problems, * and inlines
   pt = sl_expand_problem(prob_to);
   pf = sl_expand_problem(prob_from);
 
+  -- Start building new CTEs
+  newCTEs = array_prepend(ROW(pt.input_sql, pt.input_alias, pt.cols_unknown)::sl_CTE_relation, pt.ctes);
+
   -- Iterate through all CTEs (and input relation) to import
-  FOREACH cte IN (SELECT ROW(pf.input_sql, pf.input_alias, pf.cols_unknown)::sl_CTE_relation
-                  UNION ALL
-                  SELECT ctes FROM pf) LOOP
+  FOR cte IN (SELECT (ROW(pf.input_sql, pf.input_alias, pf.cols_unknown)::sl_CTE_relation).*
+		UNION ALL
+	      SELECT c.* FROM unnest(pf.ctes) c) 
+  LOOP
 
-END LOOP
-		  
+	-- Find the identical CTE in the main problem
+	SELECT i FROM generate_subscripts(newCTEs, 1) AS i
+	WHERE newCTEs[i].input_alias = cte.input_alias
+	INTO id;
 
-  --Check if the input relation columns match   
-  IF (EXISTS(SELECT * FROM sl_get_attributes_from_sql(pt.input_sql) AS s1
-  		           LEFT OUTER JOIN sl_get_attributes_from_sql(pf.input_sql) AS s2 
-  		           ON (s1.att_name =s2.att_name) AND (s1.att_type = s2.att_type)
-               WHERE s2.att_name IS NULL)) THEN
-       RAISE EXCEPTION 'The source problem has a fewer or incompatible columns to be merged with the target problem!';
-  END IF;
+	-- OK, we're replacing an existing CTE
+	IF (id IS NOT NULL) THEN
+		--Check if the input relation columns match   
+		IF (EXISTS(SELECT * FROM sl_get_CTEattributes(pt, newCTEs[id].input_alias) AS s1 LEFT OUTER JOIN 
+					 sl_get_CTEattributes(pf, cte.input_alias) AS s2 ON (s1.att_name = s2.att_name) AND (s1.att_type = s2.att_type)
+		           WHERE s2.att_name IS NULL)) THEN
+			RAISE EXCEPTION 'The source problem (%) has incompatible columns to be merged with the target problem (%)!',
+					(SELECT string_agg(s.att_name, ',') FROM sl_get_CTEattributes(pf, cte.input_alias) AS s),
+					(SELECT string_agg(s.att_name, ',') FROM sl_get_CTEattributes(pt, newCTEs[id].input_alias) AS s);
+		END IF;	
 
-  -- Check if some overlapping CTEs exists 
-  IF (EXISTS(SELECT *
-             FROM unnest(pt.ctes) AS ct INNER JOIN  
-                  unnest(pf.ctes) AS cf ON pt.input_alias = pf.input_alias)) THEN 
-      RAISE EXCEPTION 'The source and the target problems have overlapping CTEs !';
-  END IF;                  
+		newCTEs[id] = cte;	
 
-  RETURN ROW(pf.input_sql, 
+		-- RAISE NOTICE 'An existing model component "%" will be replaced.', cte.input_alias;
+	ELSE
+		-- RAISE NOTICE 'A new model component "%" will be added.', cte.input_alias;
+
+		newCTEs = array_append(newCTEs, cte);
+		
+	END IF;
+
+  END LOOP;
+
+  newInput = (SELECT c FROM unnest(newCTEs) c WHERE c.input_alias = pt.input_alias);
+ 
+
+  RETURN ROW(COALESCE(newInput.input_sql, pt.input_sql), 
              pt.input_alias, 
-             pf.cols_unknown, 
+             COALESCE(newInput.cols_unknown, pt.cols_unknown),
              CASE pf.obj_dir WHEN 'undefined' THEN pt.obj_dir ELSE pf.obj_dir END,
              CASE pf.obj_dir WHEN 'undefined' THEN pt.obj_sql ELSE pf.obj_sql END,
              pt.ctr_sql || pf.ctr_sql,
              pt.inlines || pf.inlines,
-             pt.ctes    || pf.ctes)::sl_problem;  
+             (SELECT array_agg(c) FROM unnest(newCTEs) c WHERE c.input_alias != pt.input_alias))::sl_problem;  
 END		
 $$ LANGUAGE plpgsql STRICT;
 CREATE OPERATOR << (LEFTARG = sl_problem, RIGHTARG = sl_problem, PROCEDURE = sl_problem_merge);
@@ -723,8 +747,8 @@ $$ LANGUAGE SQL IMMUTABLE STRICT;
 
 
 -- Generate the WITH clause for the destination (model) views. If present, fuses all CTE expressions and return the "WITH" expression. If no CTEs, then returns a WITH for the input relation
-CREATE OR REPLACE FUNCTION sl_get_dst_prequery(problem sl_problem, vsout sl_viewsql_out) RETURNS text AS $$
- SELECT format('WITH %s AS (%s)%s', quote_ident(problem.input_alias), vsout.sql,
+CREATE OR REPLACE FUNCTION sl_get_dst_prequery(problem sl_problem, vsout sl_viewsql_out DEFAULT NULL) RETURNS text AS $$
+ SELECT format('WITH %s AS (%s)%s', quote_ident(problem.input_alias), COALESCE(vsout.sql, problem.input_sql),
 		(SELECT string_agg(format(', %s AS (%s)', quote_ident(c.input_alias), c.input_sql), '') FROM unnest(problem.ctes) as c ) )::text
 $$ LANGUAGE sql;
 
@@ -754,8 +778,8 @@ $$ LANGUAGE SQL IMMUTABLE STRICT;
 
 -- Get attributes of a CTE expression
 CREATE OR REPLACE FUNCTION sl_get_CTEattributes(problem sl_problem, cte_alias text) RETURNS SETOF sl_attribute_desc AS $$
-SELECT sl_get_attributes_from_sql(format('%s SELECT * FROM %s', sl_get_dst_prequery(problem, ROW(problem.input_sql)::sl_viewsql_out), quote_ident(cte_alias)))
-$$ LANGUAGE SQL STABLE STRICT;
+SELECT sl_get_attributes_from_sql(format('%s SELECT * FROM %s', sl_get_dst_prequery(problem, ROW(problem.input_sql)::sl_viewsql_out), quote_ident(cte_alias)));
+$$ LANGUAGE sql STABLE STRICT;
 
 -- Get dependent RTEs of a CTE expression
 CREATE OR REPLACE FUNCTION sl_get_CTEtables(problem sl_problem, cte_alias text) RETURNS SETOF text AS $$
@@ -1183,6 +1207,7 @@ CREATE OR REPLACE FUNCTION sl_rework_CTEs(problem sl_problem) RETURNS sl_problem
 	IF array_length(cte.cols_unknown, 1)>0 THEN
 		-- Combine CTE relations
 		id_col = sl_get_unique_colname();	
+
 		cte_cols = (SELECT array_agg(c) FROM sl_get_CTEattributes(problem, cte.input_alias) AS c);
 			
 		-- Expand "*" expression in the decision column list
@@ -1213,6 +1238,9 @@ CREATE OR REPLACE FUNCTION sl_rework_CTEs(problem sl_problem) RETURNS sl_problem
 						ARRAY[]::name[] /* No single decision variable! */
 						)::sl_CTE_relation);
 	ELSE 
+		-- Add CTEs for the input relation, just in case		
+		with_sql = with_sql || format(', %s AS (%s)', cte.input_alias, cte.input_sql);
+		
 		-- Else, if no decision variables, just copy CTE's
 		new_ctes = array_append(new_ctes, cte);
 	END IF;
@@ -1394,9 +1422,11 @@ BEGIN
 	 -- Rework the problem, to eliminate CTEs with decision variables
 	 IF COALESCE(m_row.auto_rewrite_ctes, false) THEN 
 
-		 RAISE NOTICE '%', query.problem::text;
+		 -- RAISE NOTICE '%', query.problem::text;
 		 		
 		 sarg.problem = sl_rework_CTEs(query.problem);	 
+
+		 -- RAISE NOTICE '%', (sarg.problem)::text;
 		 
 		 -- Statically analyze the attributes of input SQL -- after the transformation
 		 SELECT array_agg(A::sl_attribute_desc) 
