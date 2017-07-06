@@ -372,7 +372,7 @@ BEGIN
 	IF (id IS NOT NULL) THEN
 		--Check if the input relation columns match   
 		IF (EXISTS(SELECT * FROM sl_get_CTEattributes(pt, newCTEs[id].input_alias) AS s1 LEFT OUTER JOIN 
-					 sl_get_CTEattributes(pf, cte.input_alias) AS s2 ON (s1.att_name = s2.att_name) AND (s1.att_type = s2.att_type)
+					 sl_get_CTEattributes(pf, cte.input_alias) AS s2 ON (s1.att_name = s2.att_name) -- AND (s1.att_type = s2.att_type)
 		           WHERE s2.att_name IS NULL)) THEN
 			RAISE EXCEPTION 'The source problem (%) has incompatible columns to be merged with the target problem (%)!',
 					(SELECT string_agg(s.att_name, ',') FROM sl_get_CTEattributes(pf, cte.input_alias) AS s),
@@ -1171,6 +1171,7 @@ CREATE OR REPLACE FUNCTION sl_rework_CTEs(problem sl_problem) RETURNS sl_problem
     with_sql		text;
     input_sql 		text;    
     from_sql  		text;    
+    col0_sql   		text;
     col_sql   		text;
     new_cols_unknown	name[];    
     new_ctes  		sl_CTE_relation[]; 
@@ -1194,7 +1195,8 @@ CREATE OR REPLACE FUNCTION sl_rework_CTEs(problem sl_problem) RETURNS sl_problem
    id_cols = ARRAY[id_col]::name[];
    with_sql = format('%s AS (SELECT (row_number() over ()) AS %s, * FROM (%s) AS %s)', problem.input_alias, id_col, problem.input_sql, problem.input_alias, problem.input_alias);
    from_sql = format('%s', problem.input_alias);
-   col_sql = format('((CASE WHEN %s.%s IS NULL THEN 0 ELSE 1 END)::bit(%s) << %s)', problem.input_alias, id_col, numDCtes + 1, 0);   
+   col0_sql = format('%s.*, ', problem.input_alias);
+   col_sql = format('((CASE WHEN %s.%s IS NULL THEN 0 ELSE 1 END)::bit(%s) << %s)', problem.input_alias, id_col, numDCtes + 1, 0);      
    -- New CTE for the input relation
    new_ctes = ARRAY[ROW(format('SELECT %s FROM %s WHERE %s & (1::bit(%s) << %s) <> 0::bit(%4$s)', 
 			       (SELECT string_agg(att.att_name, ',') FROM sl_get_attributes_from_sql(problem.input_sql) AS att), new_prb.input_alias, cte_flagcol, numDCtes + 1, 0), 
@@ -1220,12 +1222,16 @@ CREATE OR REPLACE FUNCTION sl_rework_CTEs(problem sl_problem) RETURNS sl_problem
 
 		-- Generate the new form clause			
 		with_sql = with_sql || format(', %s AS (SELECT (row_number() over ()) AS %s, %s FROM (%s) AS %s)', cte.input_alias, id_col, 
-						(SELECT string_agg(format('%s AS col%s_%1$s', att.att_name, cte.input_alias), ',') FROM unnest(cte_cols) AS att),
+						  (SELECT string_agg(att.att_name, ',') FROM unnest(cte_cols) AS att),
+						--(SELECT string_agg(format('%s AS col%s_%1$s', att.att_name, cte.input_alias), ',') FROM unnest(cte_cols) AS att),
 						cte.input_sql, cte.input_alias);
 		from_sql = from_sql || format(' FULL OUTER JOIN %s ON %s = COALESCE(%s)', cte.input_alias, id_col, (SELECT string_agg(c, ',')
 													            FROM unnest(id_cols) AS c));
 						
 		id_cols = array_append(id_cols, id_col);		
+
+		-- Setup all CTE columns
+		col0_sql = col0_sql || (SELECT string_agg(format('%s.%s AS col%1$s_%2$s', cte.input_alias, att.att_name), ', ') FROM unnest(cte_cols) AS att);
 
 		-- Setup the CTE flag column
 		col_sql = col_sql || format('| ((CASE WHEN %s.%s IS NULL THEN 0 ELSE 1 END)::bit(%s) << %s)', cte.input_alias, id_col, numDCtes + 1, array_length(id_cols, 1) - 1);
@@ -1247,7 +1253,7 @@ CREATE OR REPLACE FUNCTION sl_rework_CTEs(problem sl_problem) RETURNS sl_problem
    END LOOP;
 
    -- Build a new problem      
-   new_prb.input_sql = format('WITH %s SELECT *, (%s) AS %s FROM %s', with_sql, col_sql, cte_flagcol, from_sql);
+   new_prb.input_sql = format('WITH %s SELECT %s, (%s) AS %s FROM %s', with_sql, col0_sql, col_sql, cte_flagcol, from_sql);
 
    -- RAISE EXCEPTION '% %', problem.cols_unknown,  (SELECT array_agg(c) FROM (SELECT unnest(n.cols_unknown) AS c FROM unnest(problem.ctes) AS n) AS c);
 
