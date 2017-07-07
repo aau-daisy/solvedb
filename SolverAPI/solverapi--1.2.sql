@@ -1,4 +1,4 @@
-﻿-- complain if script is sourced in psql, rather than via CREATE EXTENSION
+-- complain if script is sourced in psql, rather than via CREATE EXTENSION
 \echo Use "CREATE EXTENSION solverapi" to load this file. \quit
 
 -- Adjust this setting to control where the objects get created. SET LOCAL search_path TO @extschema@;
@@ -1195,7 +1195,7 @@ CREATE OR REPLACE FUNCTION sl_rework_CTEs(problem sl_problem) RETURNS sl_problem
    id_cols = ARRAY[id_col]::name[];
    with_sql = format('%s AS (SELECT (row_number() over ()) AS %s, * FROM (%s) AS %s)', problem.input_alias, id_col, problem.input_sql, problem.input_alias, problem.input_alias);
    from_sql = format('%s', problem.input_alias);
-   col0_sql = format('%s.*, ', problem.input_alias);
+   col0_sql = format('%s.*', problem.input_alias);
    col_sql = format('((CASE WHEN %s.%s IS NULL THEN 0 ELSE 1 END)::bit(%s) << %s)', problem.input_alias, id_col, numDCtes + 1, 0);      
    -- New CTE for the input relation
    new_ctes = ARRAY[ROW(format('SELECT %s FROM %s WHERE %s & (1::bit(%s) << %s) <> 0::bit(%4$s)', 
@@ -1231,7 +1231,7 @@ CREATE OR REPLACE FUNCTION sl_rework_CTEs(problem sl_problem) RETURNS sl_problem
 		id_cols = array_append(id_cols, id_col);		
 
 		-- Setup all CTE columns
-		col0_sql = col0_sql || (SELECT string_agg(format('%s.%s AS col%1$s_%2$s', cte.input_alias, att.att_name), ', ') FROM unnest(cte_cols) AS att);
+		col0_sql = col0_sql || (SELECT string_agg(format(', %s.%s AS col%1$s_%2$s', cte.input_alias, att.att_name), '') FROM unnest(cte_cols) AS att);
 
 		-- Setup the CTE flag column
 		col_sql = col_sql || format('| ((CASE WHEN %s.%s IS NULL THEN 0 ELSE 1 END)::bit(%s) << %s)', cte.input_alias, id_col, numDCtes + 1, array_length(id_cols, 1) - 1);
@@ -1292,6 +1292,7 @@ DECLARE
  i	     integer;
  fnd	     boolean;
  log_level   text;
+ dump_query  boolean;
 BEGIN
 	 IF (query IS NULL) THEN
 	     RAISE EXCEPTION E'Optimization problem is not specified!';
@@ -1302,6 +1303,10 @@ BEGIN
 	            WHERE lower((par_val_pairs)[ind][1]) = 'help')) THEN
 	     RAISE EXCEPTION E'Help information requested\r\n%', sl_get_solverhelp(query.solver_name, query.method_name);	 
 	 END IF;
+
+	 -- Check if dump query requested
+	 SELECT ind>0 INTO dump_query FROM generate_subscripts(par_val_pairs, 1) ind WHERE lower((par_val_pairs)[ind][1]) = 'dump';	 
+	 	 
 	 -- Set's the API's version number
 	 sarg.api_version = sl_get_apiversion();
 	 -- Checks if the solver is specified
@@ -1345,7 +1350,10 @@ BEGIN
 	 IF (coalesce(array_length(par_val_pairs, 1), 0)>0) THEN 
 		 FOREACH p SLICE 1 IN ARRAY par_val_pairs
 		 LOOP
+		     CONTINUE WHEN lower(p[1])='dump';
+
 		     spair.param = p[1]; -- Cast from text to name
+		     
 		     -- Checks if it's a valid parameter
 		     SELECT * INTO par 
 		     FROM sl_parameter
@@ -1441,6 +1449,10 @@ BEGIN
 	 ELSE 
 		sarg.problem = query.problem;
 		input_atts = return_atts;
+	 END IF;
+
+	 IF (COALESCE(dump_query, false)) THEN
+		RAISE EXCEPTION 'Problem dump requested: %', sarg.problem::text;
 	 END IF;
 	 
 	 -- Detect attribute types
@@ -1539,6 +1551,17 @@ CREATE TYPE sl_unkvar AS
 CREATE OR REPLACE FUNCTION sl_unkvar_make(var_nr bigint) RETURNS sl_unkvar AS $$
    SELECT ROW(var_nr)::sl_unkvar;
 $$ LANGUAGE SQL IMMUTABLE STRICT;
+
+-- Dummy conversions, to prevent errors in the context where sl_unknown should be treated as a numeric, integer, float
+CREATE OR REPLACE FUNCTION sl_unkvar_to_numeric(sl_unkvar) RETURNS numeric STRICT IMMUTABLE LANGUAGE SQL AS 'SELECT 0.0::numeric';
+CREATE CAST (sl_unkvar AS numeric) WITH FUNCTION sl_unkvar_to_numeric(sl_unkvar) AS IMPLICIT;
+
+CREATE OR REPLACE FUNCTION sl_unkvar_to_float8(sl_unkvar) RETURNS float8 STRICT IMMUTABLE LANGUAGE SQL AS 'SELECT 0.0::float8';
+CREATE CAST (sl_unkvar AS float8) WITH FUNCTION sl_unkvar_to_float8(sl_unkvar) AS IMPLICIT;
+
+
+CREATE OR REPLACE FUNCTION sl_unkvar_to_integer(sl_unkvar) RETURNS integer STRICT IMMUTABLE LANGUAGE SQL AS 'SELECT 0::int';
+CREATE CAST (sl_unkvar AS integer) WITH FUNCTION sl_unkvar_to_integer(sl_unkvar) AS IMPLICIT;
 
 -- Enum defines basic constraint types
 CREATE TYPE sl_ctr_type AS ENUM ('eq', 'ne', 'lt', 'le','ge', 'gt');
