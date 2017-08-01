@@ -1,0 +1,61 @@
+﻿-- Installation script for ARIMA solver
+delete from sl_solver where name = 'lr_solver';
+
+
+WITH
+-- Registers the solver
+  solver AS   (INSERT INTO sl_solver(name, version, author_name, author_url, description)
+                 values ('lr_solver', 1.0, 'Davide Frazzetto', 'http://vbn.aau.dk/en/persons/davide-frazzetto(448b0269-416f-4a18-80b8-ec6b6f0bdb71).html', 'solver for linear regression') 
+              returning sid),     
+
+-- Registers the BASIC method. It has no parameters.
+ method1 AS  (INSERT INTO sl_solver_method(sid, name, name_full, func_name, prob_name, description)
+                  SELECT sid, 'lr', 'linear regression solver', 'lr_solver', 'predictive problem', 'linear regression model' 
+		  FROM solver RETURNING mid),
+
+-- Register the non-solver method associated to this solver (the method that peforms the the prediction)
+pr_method AS (INSERT INTO sl_pr_method(name, version, funct_name, description, type)
+		VALUES ('lr_method', '1.0', 'lr_predict','function that performs arima prediction','ml')
+		returning mid),
+
+sl_pr_sol_method AS (INSERT INTO sl_pr_solver_method(sid, mid)
+		SELECT sid, mid from solver, pr_method
+		returning sid),
+
+
+-- Register the parameters
+
+     spar2 AS    (INSERT INTO sl_parameter(name, type, description, value_default, value_min, value_max)
+                  values ('start_time' , 'text', 'starting_time', null, null, null) 
+                  RETURNING pid),
+     sspar2 AS   (INSERT INTO sl_solver_param(sid, pid)
+                  SELECT sid, pid FROM solver, spar2
+                  RETURNING sid),
+     spar3 AS    (INSERT INTO sl_parameter(name, type, description, value_default, value_min, value_max)
+                  values ('end_time' , 'text', 'ending_time', null, null, null) 
+                  RETURNING pid),
+     sspar3 AS   (INSERT INTO sl_solver_param(sid, pid)
+                  SELECT sid, pid FROM solver, spar3
+                  RETURNING sid),
+     spar5 AS    (INSERT INTO sl_parameter(name, type, description, value_default, value_min, value_max)
+                  values ('frequency' , 'text', 'prediction frequency', null, null, null) 
+                  RETURNING pid),
+     sspar5 AS   (INSERT INTO sl_solver_param(sid, pid)
+                  SELECT sid, pid FROM solver, spar5
+                  RETURNING sid),
+     spar7 AS    (INSERT INTO sl_parameter(name, type, description, value_default, value_min, value_max)
+                  values ('features' , 'text', 'feature columns to use', null, null, null) 
+                  RETURNING pid),
+     sspar7 AS   (INSERT INTO sl_solver_param(sid, pid)
+                  SELECT sid, pid FROM solver, spar7
+                  RETURNING sid)    
+
+
+-- Perform the actual insert
+SELECT count(*) FROM solver, method1, pr_method, sl_pr_sol_method, spar2, sspar2, spar3, sspar3, spar5, sspar5, spar7, sspar7;
+
+-- Set the default method
+UPDATE sl_solver s
+SET default_method_id = mid
+FROM sl_solver_method m
+WHERE (s.sid = m.sid) AND (s.name = 'lr_solver') AND (m.name='lr');

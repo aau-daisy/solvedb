@@ -72,6 +72,7 @@ BEGIN
 	END IF;
 
 
+	--raise notice 'time handler';
 -- 	separate training data from target data, depending if on NULL rows, or on time range
 	tmp_string_array := '{}';
 	tmp_string_array := tmp_string_array || time_feature;
@@ -103,7 +104,7 @@ BEGIN
 	for i in 1.. array_length(ts_training_tables, 1) LOOP
 		execute 'SELECT COUNT(*) FROM ' || ts_training_tables[i] into tmp_integer;
 		tmp_string  := sl_get_unique_tblname() || '_pr_ts_training';
-		EXECUTE format('CREATE TEMP VIEW %s AS SELECT %s,%s FROM %s LIMIT %s',
+		EXECUTE format('CREATE TEMP TABLE %s AS SELECT %s,%s FROM %s LIMIT %s',
 			tmp_string,
 			time_feature,
 			target_column_name,
@@ -127,7 +128,7 @@ BEGIN
 
 
 		for i in 1..array_length(ts_methods_to_test,1) LOOP
-			raise notice 'Training: %', ts_methods_to_test[i];
+			--raise notice 'Training: %', ts_methods_to_test[i];
 			-- get user defined parameter to test
 			for tmp_record in execute format('select a.name::text, type, value_default, value_min, value_max
 						from sl_pr_parameter as a

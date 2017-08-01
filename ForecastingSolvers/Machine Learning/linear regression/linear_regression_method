@@ -1,0 +1,49 @@
+﻿DROP FUNCTION IF EXISTS lr_predict(text, text, text, text);
+CREATE OR REPLACE FUNCTION lr_predict(features text,
+ target_column_name text, training_data text, test_data text)
+RETURNS NUMERIC[]
+AS $$
+	import numpy as np
+	import math
+	from sklearn import linear_model
+	train_x	= []
+	train_y	= []
+	test_x  = []
+	rv = plpy.execute(training_data)
+	features = ["outtemp","month"]
+
+	plpy.notice("linear method")
+	
+	for x in rv:
+		f_list = []
+		for feature in features:
+			f_list.append(x[feature])
+		train_x.append(f_list)
+		train_y.append(x[target_column_name])
+
+	rv = plpy.execute(test_data)
+	for x in rv:
+		f_list = []
+		for feature in features:
+			f_list.append(x[feature])
+		test_x.append(f_list)           
+	
+	regr = linear_model.LinearRegression().fit(train_x, train_y)
+	predictions = regr.predict(test_x)
+	#if needed print information about the model to the client
+	if GD["print_model_summary"]:
+		plpy.notice("Coefficients: ", regr.coef_)
+		plpy.notice("Score: ", regr.score(train_x, train_y))
+	#except Exception as ex:
+	#	#plpy.warning(format(ex))
+	#	predictions = np.array(y_train[len(y_train) - number_of_predictions:len(y_train)])
+	#except ValueError as err:
+	#	#plpy.warning(format(err))
+	#	predictions = np.array(y_train[len(y_train) - number_of_predictions:len(y_train)])
+	#--check for predictions that are nan
+	for pr in range(len(predictions)):
+		if math.isnan(predictions[pr]):
+			plpy.notice("is nan");
+			predictions[pr] = np.mean(np.array(y_train[len(y_train) - number_of_predictions:len(y_train)]))
+	return predictions.tolist();
+$$ LANGUAGE plpythonu;

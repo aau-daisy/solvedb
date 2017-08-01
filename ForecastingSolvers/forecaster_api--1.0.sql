@@ -17,10 +17,6 @@ create table sl_pr_parameter (
 	value_max	numeric
 );
 
-
-
-
-
 -- Type to contain the information of the predictive solver parameter
 DROP TYPE  IF EXISTS sl_method_parameter_type cascade;
 CREATE TYPE sl_method_parameter_type AS (
@@ -110,12 +106,13 @@ RETURNS text AS $$
 declare
 	tmp_record record;
 	tmp_string	text;
-	n_iterations	int:=100;
+	n_iterations	int:=10;
+	S 		int := 10;
 begin
 	execute format('SELECT * FROM (SOLVESELECT %s IN (SELECT %s) as sl_fts 
 			MINIMIZE (SELECT sl_evaluation_rmse(%L, %s(%s, time_column_name := %L, target_column_name := %L, 
 			training_data := %L, number_of_predictions := %s))::int) 
-			SUBJECTTO (SELECT %s FROM sl_fts) USING swarmops.pso(n:=%s)) AS sl_tmp_tmp',
+			SUBJECTTO (SELECT %s FROM sl_fts) USING swarmops.pso(n:=%s, S := %s)) AS sl_tmp_tmp',
 		(SELECT string_agg(format('%s',(parameters[j]).name), ',')
 			FROM generate_subscripts(parameters, 1) AS j),
 		(SELECT string_agg(format('NULL::%s AS %s',
@@ -137,7 +134,8 @@ begin
 			(parameters[j]).name,
 			(parameters[j]).value_max), ',')
 			FROM generate_subscripts(parameters, 1) AS j),
-			n_iterations) into tmp_record;
+			n_iterations,
+			S) into tmp_record;
 	tmp_string := replace(tmp_record::text, '(','');
 	tmp_string := replace(tmp_string, ')', '');
 	return tmp_string;
@@ -151,11 +149,11 @@ $$ language plpgsql;
 drop function if exists convert_date_string(text);
 CREATE OR REPLACE FUNCTION convert_date_string(date_string text) RETURNS text
 AS $$
-	import dateutil.parser as parser
-	try:
-		return parser.parse(date_string)s
-	except Exception:
-		return None
+import dateutil.parser as parser
+try:
+	return parser.parse(date_string)
+except Exception:
+	return None
 $$ LANGUAGE plpythonu;
 
 
@@ -297,6 +295,41 @@ BEGIN
 	query := query || target_table_name;     
 	execute query into c ;
 	-- check that the table contains data to fill
+	raise notice 'empty data: %', c;
+	IF c = 0 THEN
+		RETURN null;
+	ELSE
+		RETURN target_table_name;
+	END IF;
+END
+
+$$ LANGUAGE plpgsql STRICT;
+
+
+drop function if exists separate_input_relation_on_full_rows(text, text[], text);
+CREATE OR REPLACE FUNCTION separate_input_relation_on_full_rows(target_column_name text, 
+		feature_column_names text[], table_name text)
+  RETURNS name
+AS $$
+DECLARE
+	target_table_name text := sl_get_unique_tblname() || '_ml_view';
+	query	text := 'SELECT COUNT(*) FROM ';
+	c 	int;
+BEGIN
+	EXECUTE format('CREATE TEMP TABLE %s (%s, %s) AS SELECT %s, %s FROM %s WHERE %s is not null',
+			target_table_name,
+			(SELECT string_agg(format('%s',quote_ident(feature_column_names[j])), ',')
+				FROM generate_subscripts(feature_column_names, 1) AS j),
+			target_column_name,
+			(SELECT string_agg(format('%s',quote_ident(feature_column_names[j])), ',')
+				FROM generate_subscripts(feature_column_names, 1) AS j),
+			target_column_name,
+			table_name,
+			target_column_name);
+	query := query || target_table_name;     
+	execute query into c ;
+	raise notice 'full data: %', c;
+	-- check that the table contains data to fill
 	IF c = 0 THEN
 		RETURN null;
 	ELSE
@@ -322,7 +355,7 @@ CREATE OR REPLACE FUNCTION sl_build_view_except_from_sql(input_table text, sql t
 		i	text;
 	BEGIN
 		table_name := sl_get_unique_tblname();
-		query := format('CREATE VIEW %s(%s) AS SELECT %s from %s except 
+		query := format('CREATE TEMP TABLE %s(%s) AS SELECT %s from %s except 
 				(select %s from %s where %s in (select %s from %s)) order by %s' ,
 		table_name,
 		(SELECT string_agg(format('%s',quote_ident(columns_to_project[j])), ',')
@@ -338,15 +371,15 @@ CREATE OR REPLACE FUNCTION sl_build_view_except_from_sql(input_table text, sql t
 		sql,
 		column_for_order_exclude);
 		EXECUTE query;
-	query := 'SELECT COUNT(*) FROM ' || table_name;     
-	execute query into c ;
-	-- check that the table contains data to fill
-	IF c = 0 THEN
-		RETURN null;
-	ELSE
-		RETURN table_name;
-	END IF;
-END;
+		query := 'SELECT COUNT(*) FROM ' || table_name;     
+		execute query into c ;
+		-- check that the table contains data to fill
+		IF c = 0 THEN
+			RETURN null;
+		ELSE
+			RETURN table_name;
+		END IF;
+	END;
 $$ LANGUAGE plpgsql STRICT;
 
 -- create the temporary table to store the intermidiate results of the prediction models
