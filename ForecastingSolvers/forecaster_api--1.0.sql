@@ -183,7 +183,8 @@ $$ language plpythonu;
 
 
 drop function if exists separate_input_relation_on_time_range(name, name, text, int, text, text, text);
-CREATE FUNCTION separate_input_relation_on_time_range(target name, id name, time_column_name text, frequency int, 
+CREATE FUNCTION separate_input_relation_on_time_range(target name, id name, time_column_name text, 
+			frequency int, 
 			table_name text, starting_time text, ending_time text) RETURNS text
 AS $$
 
@@ -213,8 +214,8 @@ AS $$
 
 	if number_of_rows_to_fill < 1:
 		plpy.exception("Wrong time interval for prediction");
-	rv = plpy.execute("select count(*) as the_count from (select " + time_column_name + " from "  + table_name + " where " + time_column_name + " >= \'" + str(starting_datetime) + "\' and " + time_column_name + " <= \'" + str(ending_datetime) + "\' order by " + time_column_name + " asc) as b")
-	number_of_rows_to_fill_already_in_table = int(rv[0]['the_count'])
+	#rv = plpy.execute("select count(*) as the_count from (select " + time_column_name + " from "  + table_name + " where " + time_column_name + " >= \'" + str(starting_datetime) + "\' and " + time_column_name + " <= \'" + str(ending_datetime) + "\' order by " + time_column_name + " asc) as b")
+	#number_of_rows_to_fill_already_in_table = int(rv[0]['the_count'])
 	
 	
 	# create temporary table with rows to fill

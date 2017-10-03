@@ -209,6 +209,12 @@ BEGIN
 	raise notice 'final_ml_features-----------%', final_ml_features;
 	raise notice 'ts:%, ml:%', test_ts_methods, test_ml_methods;
 	raise notice 'target:%', target_column_name;
+
+	-- prepare table for containing predictions
+
+
+
+
 	
 
 
@@ -218,10 +224,11 @@ BEGIN
 			attEndTime, attFrequency, final_ts_features[0], input_table_tmp_name, 
 			results_table, ts_methods_to_test) into training_test;	
 	END IF;
-	IF test_ml_methods THEN
-		SELECT sl_ml_models_handler(arg, target_column_name, target_column_type, final_ml_features,
-			input_table_tmp_name, results_table, ml_methods_to_test, k) into training_test;
-	END IF;
+	-- DEBUG
+	--IF test_ml_methods THEN
+	--	SELECT sl_ml_models_handler(arg, target_column_name, target_column_type, final_ml_features,
+	--		input_table_tmp_name, results_table, ml_methods_to_test, k) into training_test;
+	--END IF;
 
 
 -- 	look in the results table the model with the best result
@@ -232,93 +239,88 @@ BEGIN
 	execute format('select parameters from %s where result is not null order by result desc limit 1', results_table) into tmp_string;
 
 	--PRINT INFORMATION FOR THE USER
-	--raise notice '---------------------------------------------';
-	--raise notice 'Best method found for the given data: %s', chosen_method;
-	--raise notice 'Parameters for the method: %', tmp_string;
-	--raise notice 'The method has given a RMSE of % on the training data', tmp_numeric;
-	--PERFORM sl_set_print_model_summary_on();
+	raise notice '---------------------------------------------';
+	raise notice 'Best method found for the given data: %s', chosen_method;
+	raise notice 'Parameters for the method: %', tmp_string;
+	raise notice 'The method has given a RMSE of % on the training data', tmp_numeric;
+	PERFORM sl_set_print_model_summary_on();
 	--raise notice 'training test is %', training_test->'test';
 	
 	training_data_query := format('SELECT * FROM %s', training_test->'training');
 
-	EXECUTE format('select lr_predict(features := %L,
-	 target_column_name := %L, training_data := %L, test_data := %L)', 
-		'',
-		'pvsupply', 
-		training_data_query,
-		format('SELECT * FROM %s', training_test->'test'))
-		into predictions;
+	--EXECUTE format('select lr_predict(features := %L,
+	-- target_column_name := %L, training_data := %L, test_data := %L)', 
+	--	'',
+	--	'pvsupply', 
+	--	training_data_query,
+	--	format('SELECT * FROM %s', training_test->'test'))
+	--	into predictions;
+
 	-- FOR Ts--TODO:FIX THE FLOW
--- 	EXECUTE format('SELECT count(*) FROM %s', training_test->'test') into i;
--- 	EXECUTE format('SELECT %s(%s, time_column_name:=%L, target_column_name:=%L, training_data:=%L, number_of_predictions:=%s)',
--- 			chosen_method,
--- 			tmp_string, 
--- 			input_time_col_names[0],
--- 			target_column_name,
--- 			training_data_query,
--- 			i) into predictions;
+ 	EXECUTE format('SELECT count(*) FROM %s', training_test->'test') into i;
+ 	EXECUTE format('SELECT %s(%s, time_column_name:=%L, target_column_name:=%L, training_data:=%L, number_of_predictions:=%s)',
+ 			chosen_method,
+ 			tmp_string, 
+ 			input_time_col_names[0],
+ 			target_column_name,
+ 			training_data_query,
+ 			i) into predictions;
 
  	tmp_string_array := '{}';
 
 
 -- 	Write the predictions in the final table
 ----ML flow TODO: fix and integrate
-	i := 1;
-	for tmp_record in EXECUTE format('SELECT ts as t FROM %s where pvsupply is null order by ts', 
-		input_table_tmp_name) 
-	LOOP
-		EXECUTE format('UPDATE %s SET %s = %s WHERE %s=%L',
-				input_table_tmp_name,
-				target_column_name,
-				predictions[i],
-				'ts',
-				tmp_record.t);
-		i = i + 1;
-	END LOOP;
-	
+-- 	i := 1;
+-- 	for tmp_record in EXECUTE format('SELECT ts as t FROM %s where pvsupply is null order by ts', 
+-- 		input_table_tmp_name) 
+-- 	LOOP
+-- 		EXECUTE format('UPDATE %s SET %s = %s WHERE %s=%L',
+-- 				input_table_tmp_name,
+-- 				target_column_name,
+-- 				predictions[i],
+-- 				'ts',
+-- 				tmp_record.t);
+-- 		i = i + 1;
+-- 	END LOOP;
+-- 	
 	
 				
 
 --TS flow, TODO: fix and integrate with ML
 
-	-- -- -- -- for tmp_record in EXECUTE format('SELECT %s as t FROM %s ORDER BY %s ASC', 
--- -- -- -- 		input_time_col_names[0],
--- -- -- -- 		training_test->'test',
--- -- -- -- 		input_time_col_names[0]
--- -- -- -- 		) 
--- -- -- -- 	LOOP
--- -- -- -- 		tmp_string_array := tmp_string_array || tmp_record.t::text;
--- -- -- -- 	END LOOP;
--- -- -- -- 	for i in 1..array_length(tmp_string_array, 1) LOOP
--- -- -- -- 			EXECUTE format('UPDATE %s SET %s = %s WHERE %s=%L',
--- -- -- -- 				input_table_tmp_name,
--- -- -- -- 				target_column_name,
--- -- -- -- 				predictions[i],
--- -- -- -- 				input_time_col_names[0],
--- -- -- -- 				tmp_string_array[i]
--- -- -- -- 				);
--- -- -- -- 			EXECUTE format('INSERT INTO %s(%s, %s) SELECT %L, %s WHERE NOT EXISTS (SELECT 1 FROM %s WHERE %s=%L)',
--- -- -- -- 				input_table_tmp_name,
--- -- -- -- 				input_time_col_names[0],
--- -- -- -- 				target_column_name,
--- -- -- -- 				tmp_string_array[i],
--- -- -- -- 				predictions[i],
--- -- -- -- 				input_table_tmp_name,
--- -- -- -- 				input_time_col_names[0],
--- -- -- -- 				tmp_string_array[i]
--- -- -- -- 				);
--- -- -- -- 
--- -- -- -- 	END LOOP;
+	for tmp_record in EXECUTE format('SELECT %s as t FROM %s ORDER BY %s ASC', 
+			input_time_col_names[0],
+			training_test->'test',
+			input_time_col_names[0]
+			) 
+		LOOP
+			tmp_string_array := tmp_string_array || tmp_record.t::text;
+		END LOOP;
+		for i in 1..array_length(tmp_string_array, 1) LOOP
+				EXECUTE format('UPDATE %s SET %s = %s WHERE %s=%L',
+					input_table_tmp_name,
+					target_column_name,
+					predictions[i],
+					input_time_col_names[0],
+					tmp_string_array[i]
+					);
+				EXECUTE format('INSERT INTO %s(%s, %s) SELECT %L, %s WHERE NOT EXISTS (SELECT 1 FROM %s WHERE %s=%L)',
+					input_table_tmp_name,
+					input_time_col_names[0],
+					target_column_name,
+					tmp_string_array[i],
+					predictions[i],
+					input_table_tmp_name,
+					input_time_col_names[0],
+					tmp_string_array[i]
+					);
+
+		END LOOP;
 
         RETURN QUERY EXECUTE sl_return(arg, sl_build_out(arg));
         perform sl_drop_view_cascade(input_table_tmp_name);
 END;
 $$ LANGUAGE plpgsql STRICT;
-
-
--- 
--- solveselect watt in (select * from activation_device_log) 
--- using predictive_solver(start_time:='2014-12-04 00:00:00', end_time := '2014-12-06 23:00:00');
-
 
 
