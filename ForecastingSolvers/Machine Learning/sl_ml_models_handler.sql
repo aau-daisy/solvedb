@@ -25,7 +25,7 @@ BEGIN
 
 	-- split into training data (with filled target column) and target data 
 	-- (with empty target column/given time range)
-	-- separate traning data from target data (for ml methods)
+	-- separate traning data from target data
 	tmp_string_array := final_ml_features;
 	tmp_string_array := tmp_string_array ||  arg.tmp_id::text;
 	ml_target_table := separate_input_relation_on_empty_rows(target_column_name, tmp_string_array, 
