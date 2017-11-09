@@ -1,4 +1,4 @@
--- complain if script is sourced in psql, rather than via CREATE EXTENSION
+﻿-- complain if script is sourced in psql, rather than via CREATE EXTENSION
 \echo Use "CREATE EXTENSION solverapi" to load this file. \quit
 
 -- Adjust this setting to control where the objects get created. SET LOCAL search_path TO @extschema@;
@@ -634,14 +634,14 @@ $$ LANGUAGE SQL IMMUTABLE STRICT;
 -- [Rename] Build a view SQL where names of id, unknown-variable, and remaining attribute columns are renamed.
 -- 
 CREATE OR REPLACE FUNCTION sl_build_out_rename(arg sl_solver_arg, base sl_viewsql_out, col_type sl_attribute_kind, col_alias text) RETURNS sl_viewsql_out AS $$
-	SELECT format('SELECT %s, %s, %s FROM (%s) AS s',
+	SELECT format('SELECT %s %s %s FROM (%s) AS s',
 		       CASE col_type 
 			       WHEN 'id'::sl_attribute_kind THEN format('%s AS %s', quote_ident(arg.tmp_id), quote_ident(col_alias))
 			       ELSE arg.tmp_id 
 		       END,		       
-		       (SELECT string_agg(att_name, ',')
+		       (SELECT ', ' || string_agg(att_name, ',')
 	                FROM (SELECT att_name FROM sl_get_attributes(arg) WHERE att_kind = 'unknown') AS A),
-		       (SELECT string_agg(att_name, ',')
+		       (SELECT ', ' || string_agg(att_name, ',')
 	                FROM (SELECT att_name FROM sl_get_attributes(arg) WHERE att_kind = 'known') AS A),
 		        base.sql
 		     );

@@ -561,7 +561,7 @@ static Node *makeRecursiveViewSelect(char *relname, List *aliases, Node *query);
 %type <list>	solve_problem opt_solve_maxmin_clause opt_solve_colid_list solve_colid_list opt_solve_subto_clause solve_selectstmt_list opt_solver_params solver_params opt_solve_cte_clause opt_solve_inline_clause solve_cte_clause_exp_list solve_cte_clause_exp
 %type <chr>		solve_maxminimize
 %type <node>	solve_selectstmt
-%type <str>		op_solve_input_name opt_solvermethod
+%type <str>		opt_solvermethod
 %type <defelt>	solver_param
 
 /* SolveDB END */
@@ -978,12 +978,12 @@ SolveStmt: SOLVESELECT solve_problem
 		;
 
 /* This rule is for problem specification. Returns  (1) sl_problem specification, (2) input query, and (3) input query alias  */
-solve_problem:	opt_solve_colid_list '(' SelectStmt ')' op_solve_input_name opt_solve_inline_clause opt_solve_cte_clause opt_solve_maxmin_clause opt_solve_subto_clause
+solve_problem:	opt_solve_colid_list '(' SelectStmt ')' opt_solve_inline_clause opt_solve_cte_clause opt_solve_maxmin_clause opt_solve_subto_clause
 				{
 						Node * problem;
 						char *input_sql;
-						char *input_alias = $5 != NULL ? $5 : "input_relation";
-						List *mm_clause = $8;
+						char *input_alias =  list_nth($1, 1) != NULL ? list_nth($1, 1) : "input_relation";
+						List *mm_clause = $7;
 				
 						/* Read an input SQL as string */
 						input_sql = parser_str_from_scanbuf(@2+1, @4-@2-1);
@@ -992,20 +992,22 @@ solve_problem:	opt_solve_colid_list '(' SelectStmt ')' op_solve_input_name opt_s
 						/* Build the problem */
 						problem = makeSolveProblem(input_sql,  /* Input SQL */
 	 								  input_alias,/* Alias of the input */
-								      $1,         /* A list of unknown columns */
-								      $6,		  /* Inline list */	
-									  $7,		  /* CTEs list */
+								      list_nth($1, 0),    /* A list of unknown columns */
+								      $5,		  /* Inline list */	
+									  $6,		  /* CTEs list */
 	 							      mm_clause != NULL ? ((char ) (long) (void *) list_nth(mm_clause, 0)) : 'u',  /* Objective direction */
 								      mm_clause != NULL ? (char *) list_nth(mm_clause, 1) : NULL,       /* Objective SQL */
-							 	      $9, 	  /* A list of subject to SQL statements */
+							 	      $8, 	  /* A list of subject to SQL statements */
 								      @1);
 
 						$$ = list_make3(problem, $3, input_alias);
 				}
 		;
 
-opt_solve_colid_list:		solve_colid_list IN_P	{ $$ = $1; }
-				| 			{ $$ = NIL; }
+opt_solve_colid_list:		solve_colid_list IN_P name AS	{ $$ = list_make2($1, $3); }
+				| solve_colid_list IN_P		{ $$ = list_make2($1, NULL); }
+				| name AS 			{ $$ = list_make2(NULL, $1); }
+				| /* Empty */ 			{ $$ = list_make2(NULL, NULL); }
 		;
 
 solve_colid_list: 			ColId					{ $$ = list_make1(makeStringConst($1,  @1));	}
@@ -1013,9 +1015,6 @@ solve_colid_list: 			ColId					{ $$ = list_make1(makeStringConst($1,  @1));	}
 				| ColId ',' solve_colid_list		{ $$ = lappend($3, makeStringConst($1, @1)); 	}
 		;
 				
-op_solve_input_name:	    AS name 		    { $$ = $2; }
-                | /* Empty */					{ $$ = NULL; }
-        ;
 
 opt_solve_inline_clause:	INLINE_P solve_cte_clause_exp_list { $$ = $2;  }
                 | /* Empty */	      					   	   { $$ = NIL; }
