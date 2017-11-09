@@ -266,11 +266,16 @@ $$ LANGUAGE plpgsql VOLATILE STRICT;
 
 -- Dynamically generates a solve select query (reverses the sl_problem)
 CREATE OR REPLACE FUNCTION sl_generate_solve_query(query sl_solve_query, par_val_pairs text[][] DEFAULT NULL::text[][]) RETURNS text AS $$
-  SELECT format('SOLVESELECT %s IN (%s) AS %s %s %s %s %s USING %s(%s)', 
-	    (SELECT string_agg(c, ',') FROM unnest((query.problem).cols_unknown) AS c),  -- Unknown attribute list
-	    (query.problem).input_sql, 						     -- Input relation
-	    (query.problem).input_alias,						     -- Input relation alias
-	    CASE WHEN array_length((query.problem).inlines, 1) > 0 			     -- Inline clause
+  SELECT format('SOLVESELECT %s%s AS (%s) %s %s %s %s USING %s(%s)', 
+	      -- Unknown attribute list
+	    (CASE WHEN array_length((query.problem).cols_unknown, 1) > 0
+		  THEN format('%s IN ', (SELECT string_agg(c, ',') FROM unnest((query.problem).cols_unknown) AS c))
+		  ELSE ''
+	     END),
+	    
+	    (query.problem).input_alias,						 -- Input relation alias
+	    (query.problem).input_sql, 						         -- Input relation
+	    CASE WHEN array_length((query.problem).inlines, 1) > 0 			 -- Inline clause
 	         THEN format('INLINE %s', 
 		  (SELECT string_agg(format('%s (%s) AS %s',
 		    (CASE WHEN array_length(c.cols_unknown, 1) > 0
@@ -284,13 +289,13 @@ CREATE OR REPLACE FUNCTION sl_generate_solve_query(query sl_solve_query, par_val
 	    END,	    
 	    CASE WHEN array_length((query.problem).ctes, 1) > 0 			     -- CTE clause
 	         THEN format('WITH %s', 
-		  (SELECT string_agg(format('%s (%s) AS %s',
+		  (SELECT string_agg(format('%s %s AS (%s)',
 		    (CASE WHEN array_length(c.cols_unknown, 1) > 0
 		          THEN format('%s IN', (SELECT string_agg(u, ',') FROM unnest(c.cols_unknown) AS u))
 		          ELSE ''
 		     END),
-		     c.input_sql,
-		     c.input_alias), ',') 
+		     c.input_alias,
+		     c.input_sql), ',') 
 		   FROM unnest((query.problem).ctes) AS c))
 	         ELSE ''
 	    END,
@@ -330,15 +335,23 @@ $$ LANGUAGE sql;
 CREATE CAST (sl_solve_query AS text) WITH FUNCTION sl_generate_solve_query(sl_solve_query) AS IMPLICIT;
 CREATE CAST (sl_problem AS text) WITH FUNCTION sl_generate_solve_query(sl_problem) AS IMPLICIT;
 
--- N/A This function executes the model - either by running SOLVESELECT or SELECT depending on if there're decision variables
+-- This function evaluated query in the context of the model
 CREATE OR REPLACE FUNCTION sl_execute(problem sl_problem, query text) RETURNS SETOF RECORD AS $$ 
  BEGIN 	
 	RETURN QUERY EXECUTE format('%s SELECT * FROM (%s) AS s', sl_get_dst_prequery(problem), query);				
  END;
 $$ LANGUAGE plpgsql;
+
+DROP FUNCTION sl_create_execute_view(sl_problem, text, text)
+CREATE OR REPLACE FUNCTION sl_create_execute_view(problem sl_problem, query text, view_name text) RETURNS void AS $$ 
+ BEGIN 	
+	EXECUTE format('CREATE OR REPLACE TEMP VIEW %s AS %s SELECT * FROM (%s) AS s', view_name, sl_get_dst_prequery(problem), query);
+	RETURN;
+ END;
+$$ LANGUAGE plpgsql VOLATILE;
+
+
 CREATE OPERATOR >> (LEFTARG = sl_problem, RIGHTARG = text, PROCEDURE = sl_execute);
-
-
 
 -- This function merges two problems by overriding input, objective fn, constrainsts in targer problem, replacing with those from the source 
 CREATE OR REPLACE FUNCTION sl_problem_merge(prob_to sl_problem, prob_from sl_problem) returns sl_problem AS $$

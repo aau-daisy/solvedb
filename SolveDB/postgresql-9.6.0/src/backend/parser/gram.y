@@ -632,7 +632,7 @@ static Node *makeRecursiveViewSelect(char *relname, List *aliases, Node *query);
 	LEADING LEAKPROOF LEAST LEFT LEVEL LIKE LIMIT LISTEN LOAD LOCAL
 	LOCALTIME LOCALTIMESTAMP LOCATION LOCK_P LOCKED LOGGED
 
-	MAPPING MATCH MATERIALIZED MAXIMIZE MAXVALUE METHOD MINIMIZE MINUTE_P MINVALUE MODE MONTH_P MOVE
+	MAPPING MATCH MATERIALIZED MAXIMIZE MAXVALUE METHOD MINIMIZE MINUTE_P MINVALUE MODE MODELEVAL MONTH_P MOVE
 
 	NAME_P NAMES NATIONAL NATURAL NCHAR NEXT NO NONE
 	NOT NOTHING NOTIFY NOTNULL NOWAIT NULL_P NULLIF
@@ -654,7 +654,7 @@ static Node *makeRecursiveViewSelect(char *relname, List *aliases, Node *query);
 
 	SAVEPOINT SCHEMA SCROLL SEARCH SECOND_P SECURITY SELECT SEQUENCE SEQUENCES
 	SERIALIZABLE SERVER SESSION SESSION_USER SET SETS SETOF SHARE SHOW	
-	SIMILAR SIMPLE SKIP SMALLINT SNAPSHOT SOLVEPREPARE SOLVESELECT SOME SQL_P STABLE STANDALONE_P START
+	SIMILAR SIMPLE SKIP SMALLINT SNAPSHOT SOLVEMODEL SOLVESELECT SOME SQL_P STABLE STANDALONE_P START
 	STATEMENT STATISTICS STDIN STDOUT STORAGE STRICT_P STRIP_P SUBJECTTO SUBSTRING
 	SYMMETRIC SYSID SYSTEM_P
 
@@ -778,6 +778,111 @@ stmtmulti:	stmtmulti ';' stmt
 						$$ = list_make1($1);
 					else
 						$$ = NIL;
+				}
+/* SOLVEDB: MODELEVAL Support */
+			| MODELEVAL '(' SelectStmt ')' IN_P '(' SelectStmt ')'
+				{
+					/* This will get rewritten into two statements: 
+					
+					SELECT sl_create_execute_view((SELECT m FROM t), 'SELECT 1', 'tmppp');
+
+					WITH res AS (SELECT * FROM tmppp)
+					SELECT res.* FROM res, sl_drop_view('tmppp');						
+
+					*/
+
+					/* Stmt1 vars */
+					SelectStmt *s1;
+					char *query_sql;
+					FuncCall * fc1;
+					ResTarget *rt1;
+					SubLink *n1 = makeNode(SubLink);
+					
+					/* Stmt2 vars */
+					SelectStmt *s2, *ss2;
+					ResTarget *srt2, *rt2;
+					ColumnRef *cr2, *cr22;
+					CommonTableExpr *c2 = makeNode(CommonTableExpr);
+					WithClause *w2 = makeNode(WithClause);
+					
+					/* Build statement 1 */ 
+
+					/* Copy the actual query */
+					query_sql = parser_str_from_scanbuf(@2+1, @4-@2-1);
+					Assert(query_sql != NULL && query_sql[0] != '\0');	 /* This cannot happen */
+
+					n1->subLinkType = EXPR_SUBLINK;
+					n1->subLinkId = 0;
+					n1->testexpr = NULL;
+					n1->operName = NIL;
+					n1->subselect = $7;
+					n1->location = @7;
+
+					fc1 = makeFuncCall(
+						list_make1(makeString("sl_create_execute_view")),
+						list_make3(
+						     /* First argument: the actual sub-select */
+					             n1,
+						     /* Second argument: the user query as text */
+						     makeStringConst(query_sql, @3),
+						     /* Third argument: the temp table name */	
+			    	 	             makeStringConst("tmp_model_eval_view", @3)
+						),
+						@3);
+					  					
+
+					rt1 = makeNode(ResTarget);
+					rt1->name = NULL;
+					rt1->indirection = NIL;
+					rt1->val = (Node *)fc1;
+					rt1->location = -1;				
+
+					s1 = makeNode(SelectStmt);
+					s1->targetList = list_make1(rt1);
+
+					/* Build statement 2: Not finished! */ 
+
+					cr2 = makeNode(ColumnRef);
+					cr2->fields = list_make1(makeNode(A_Star));
+					cr2->location = -1;
+
+					srt2 = makeNode(ResTarget);
+					srt2->name = NULL;
+					srt2->indirection = NIL;
+					srt2->val = (Node *)cr2;
+					srt2->location = -1;				
+
+					ss2 = makeNode(SelectStmt);
+					ss2->targetList = list_make1(srt2);
+					ss2->fromClause = list_make1(makeRangeVar(NULL, "tmp_model_eval_view", -1));
+
+					c2->ctename = "res";
+					c2->aliascolnames = NIL;
+					c2->ctequery = (Node *)ss2;
+					c2->location = -1;
+                                                          					
+					w2->ctes = list_make1(c2);
+					w2->location = -1;					
+
+
+					cr22 = makeNode(ColumnRef);
+					cr22->fields = list_make1(makeNode(A_Star));
+					cr22->location = -1;
+
+
+					rt2 = makeNode(ResTarget);
+					rt2->name = NULL;
+					rt2->indirection = NIL;
+					rt2->val = (Node *)cr22;
+					rt2->location = -1;				
+
+
+					s2 = makeNode(SelectStmt);
+					s2->withClause = w2;
+					s2->targetList = list_make1(rt2);
+					s2->fromClause = list_make1(makeRangeVar(NULL, "res", -1));
+
+					$$ = list_make2(s1, s2);
 				}
 		;
 
@@ -1028,12 +1133,12 @@ solve_cte_clause_exp_list:  solve_cte_clause_exp   { $$ = list_make1($1); }
 				|			solve_cte_clause_exp ',' solve_cte_clause_exp_list { $$ = lcons($1, $3); }
 		;
 				
-solve_cte_clause_exp:	opt_solve_colid_list '(' SelectStmt ')' AS name 
+solve_cte_clause_exp:	opt_solve_colid_list '(' SelectStmt ')'
 					{
 						char * sql = parser_str_from_scanbuf(@2+1, @4-@2-1);
 						/* This cannot happen */
 						Assert(sql != NULL && sql[0] != '\0');
-						$$ = list_make3($1, makeStringConst(sql, @3), $6); 
+						$$ = list_make3(list_nth($1, 0), makeStringConst(sql, @3), list_nth($1, 1)); 
 					}
 		;
 
@@ -12409,7 +12514,7 @@ c_expr:		columnref								{ $$ = $1; }
 				  g->location = @1;
 				  $$ = (Node *)g;
 			  }
-			| '(' SOLVEPREPARE solve_problem ')' 
+			| '(' SOLVEMODEL solve_problem ')' 
 			  {
 			  	  $$ = list_nth($3, 0);	
 			  } 
@@ -14368,6 +14473,7 @@ reserved_keyword:
 			| LOCALTIMESTAMP
 			| MAXIMIZE
 			| MINIMIZE
+			| MODELEVAL
 			| NOT
 			| NULL_P
 			| OFFSET
@@ -14381,7 +14487,7 @@ reserved_keyword:
 			| RETURNING
 			| SELECT
 			| SESSION_USER
-			| SOLVEPREPARE
+			| SOLVEMODEL
 			| SOLVESELECT
 			| SOME
 			| SUBJECTTO
