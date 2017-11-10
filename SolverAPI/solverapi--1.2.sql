@@ -853,11 +853,7 @@ CREATE OR REPLACE FUNCTION sl_problem_check(prob sl_problem, input_sql_attrs sl_
    END IF;
 
    IF (COALESCE(array_length(prob.cols_unknown, 1), 0) = 0) THEN 
-	RAISE EXCEPTION 'Error retrieving input query columns'; 
-   END IF;
-
-   IF (COALESCE(array_length(prob.cols_unknown, 1), 0) = 0) THEN 
-	RAISE EXCEPTION 'No attributes for unknown variables are specified'; 
+	RAISE NOTICE 'No decision columns are specified.'; 
    END IF;
       
    -- Let's do a nested loop to check validity of unknown attributes
