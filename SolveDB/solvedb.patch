@@ -623,6 +623,107 @@ diff -ruN postgresql-9.6.0_org/src/backend/parser/gram.y postgresql-9.6.0/src/ba
  /* parser_init()
   * Initialize to parse one query string
   */
+diff -ruN postgresql-9.6.0_org/src/backend/parser/parse_relation.c postgresql-9.6.0/src/backend/parser/parse_relation.c
+--- postgresql-9.6.0_org/src/backend/parser/parse_relation.c	2016-09-26 22:26:58.000000000 +0200
++++ postgresql-9.6.0/src/backend/parser/parse_relation.c	2017-06-02 08:56:05.000000000 +0200
+@@ -27,6 +27,7 @@
+ #include "parser/parsetree.h"
+ #include "parser/parse_relation.h"
+ #include "parser/parse_type.h"
++#include "parser/analyze.h"
+ #include "utils/builtins.h"
+ #include "utils/lsyscache.h"
+ #include "utils/rel.h"
+@@ -1388,6 +1389,7 @@
+ {
+ 	RangeTblEntry *rte = makeNode(RangeTblEntry);
+ 	Alias	   *alias = rangefunc->alias;
++	Node 	   *coldef_subquery = rangefunc->coldef_subquery;
+ 	Alias	   *eref;
+ 	char	   *aliasname;
+ 	int			nfuncs = list_length(funcexprs);
+@@ -1457,7 +1459,7 @@
+ 		 * A coldeflist is required if the function returns RECORD and hasn't
+ 		 * got a predetermined record type, and is prohibited otherwise.
+ 		 */
+-		if (coldeflist != NIL)
++		if (coldeflist != NIL || coldef_subquery != NULL)
+ 		{
+ 			if (functypclass != TYPEFUNC_RECORD)
+ 				ereport(ERROR,
+@@ -1492,7 +1494,71 @@
+ 							   -1,
+ 							   0);
+ 		}
+-		else if (functypclass == TYPEFUNC_RECORD)
++		else if (functypclass == TYPEFUNC_RECORD && coldef_subquery != NULL)
++			{
++				/* Use the column definition sub-query to form the alias list and
++				 * funccoltypes/funccoltypmods/funccolcollations lists */
++				ListCell   *tl;
++				ParseState *sub_pstate;
++				Query		*query;
++
++				if (!IsA(coldef_subquery, SelectStmt))
++					ereport(ERROR,
++							(errcode(ERRCODE_INVALID_TABLE_DEFINITION),
++							 errmsg("Only SELECT query can be used to define columns of a function "),
++							 parser_errposition(pstate, exprLocation(funcexpr))));
++
++				sub_pstate = make_parsestate(NULL);
++				query = transformTopLevelStmt(sub_pstate, coldef_subquery);
++				free_parsestate(sub_pstate);
++
++				Assert(query->commandType == CMD_SELECT);
++
++				/*
++				 * Use the column definition list to construct a tupdesc and fill
++				 * in the RangeTblFunction's lists.
++				 */
++				tupdesc = CreateTemplateTupleDesc(list_length(query->targetList), false);
++
++				// When the parsing is done, build a respective column description
++				i = 1;
++				foreach(tl, query->targetList)
++				{
++					TargetEntry * te = (TargetEntry *) lfirst(tl);
++					char	   *attrname;
++					Oid			attrtype;
++					int32		attrtypmod;
++					Oid			attrcollation;
++
++					if (te->resjunk) continue;
++
++					attrname = pstrdup(te->resname);
++					attrtype = exprType((Node *) te->expr);
++					attrtypmod = exprTypmod((Node *) te->expr);
++					attrcollation = exprCollation((Node *) te->expr);
++
++					TupleDescInitEntry(tupdesc, (AttrNumber) i, attrname,  attrtype, attrtypmod, 0);
++					TupleDescInitEntryCollation(tupdesc, (AttrNumber) i, attrcollation);
++
++					rtfunc->funccolnames = lappend(rtfunc->funccolnames, makeString(pstrdup(attrname)));
++					rtfunc->funccoltypes = lappend_oid(rtfunc->funccoltypes, attrtype);
++					rtfunc->funccoltypmods = lappend_int(rtfunc->funccoltypmods, attrtypmod);
++					rtfunc->funccolcollations = lappend_oid(rtfunc->funccolcollations, attrcollation);
++
++					i++;
++				}
++
++				/* Apply only for the 1st function */
++			coldef_subquery = NULL;
++			pfree(query);
++
++			/*
++			 * Ensure that the coldeflist defines a legal set of names (no
++			 * duplicates) and datatypes (no pseudo-types, for instance).
++			 */
++			CheckAttributeNamesTypes(tupdesc, RELKIND_COMPOSITE_TYPE, false);
++		}
++		else if (functypclass == TYPEFUNC_RECORD && coldef_subquery == NULL)
+ 		{
+ 			ListCell   *col;
+ 
 diff -ruN postgresql-9.6.0_org/src/backend/parser/scan.l postgresql-9.6.0/src/backend/parser/scan.l
 --- postgresql-9.6.0_org/src/backend/parser/scan.l	2016-09-26 22:26:58.000000000 +0200
 +++ postgresql-9.6.0/src/backend/parser/scan.l	2017-06-02 08:56:05.000000000 +0200
