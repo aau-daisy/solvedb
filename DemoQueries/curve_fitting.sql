@@ -1,4 +1,4 @@
-﻿-- Create the points tables
+-- Create the points tables
 DROP TABLE IF EXISTS points;
 CREATE TABLE points AS
 SELECT id, x, (1.3*x + 1) as y FROM 
@@ -8,7 +8,7 @@ SELECT id, x, (1.3*x + 1) as y FROM
 SELECT * FROM points;
 
 -- Distribute points on a circle of the radius 10.
-SOLVESELECT a, b IN (SELECT NULL::float8 AS a, NULL::float8 AS b) AS t
+SOLVESELECT t(a, b) AS (SELECT NULL::float8 AS a, NULL::float8 AS b)
 MINIMIZE   (SELECT sum(abs(y - (a*x+b))) FROM t, points)
 SUBJECTTO  (SELECT -100<=a<=100, -100<=b<=100 FROM t)
 USING swarmops.pso(n:=30000);

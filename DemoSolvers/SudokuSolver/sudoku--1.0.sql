@@ -113,14 +113,13 @@ CREATE OR REPLACE FUNCTION sudoku_solve_default(arg sl_solver_arg) RETURNS setof
      -- Create a view to solve the LP problem     
      CREATE TEMP VIEW sudoku_result AS 
 	     SELECT id_col, col,row,val FROM (
-		   SOLVESELECT fval IN (SELECT id_col,
+		   SOLVESELECT sudoku(fval) AS (SELECT id_col,
 		                         S.col,
 					 S.row, 
 					 V as val, 
 					 COALESCE(S.val=V, false) as giv,
 					 false as fval
-				  FROM sudoku_input S, generate_series(1, 9) V
-				 ) as sudoku
+				  FROM sudoku_input S, generate_series(1, 9) V)
 		   SUBJECTTO 
 			  -- Built-in constraints
 			  (SELECT fval = giv FROM sudoku WHERE giv),

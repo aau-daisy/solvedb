@@ -15,7 +15,7 @@ VALUES ('item 1', 10.0, 5.0, NULL),
 
 -- Solve the problem
 SELECT * FROM (
-SOLVESELECT quantity IN (SELECT * FROM item) as u
+SOLVESELECT u(quantity) AS (SELECT * FROM item)
 MAXIMIZE  (SELECT SUM(quantity * profit) FROM u)
 SUBJECTTO (SELECT SUM(quantity * weight) <= 15 FROM u),
 	  (SELECT 0 <= quantity <=1 FROM u)

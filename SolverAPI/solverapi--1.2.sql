@@ -1,4 +1,4 @@
-﻿-- complain if script is sourced in psql, rather than via CREATE EXTENSION
+-- complain if script is sourced in psql, rather than via CREATE EXTENSION
 \echo Use "CREATE EXTENSION solverapi" to load this file. \quit
 
 -- Adjust this setting to control where the objects get created. SET LOCAL search_path TO @extschema@;

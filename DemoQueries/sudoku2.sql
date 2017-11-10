@@ -1,7 +1,8 @@
 -- TODO: Make sure the SudokuSolver is installed for this query 
 
 -- Install data first
-﻿DROP TABLE IF EXISTS sudoku;
+DROP TABLE IF EXISTS sudoku;
+
 CREATE TABLE sudoku (
   ID   INT ,
   COL  INT ,
@@ -93,7 +94,7 @@ INSERT INTO sudoku (ID, COL, LIN, VAL) VALUES (1, 9, 8, 0);
 INSERT INTO sudoku (ID, COL, LIN, VAL) VALUES (1, 9, 9, 9);
 
 -- Solve the Sudoku problem using the specialized solver
-SOLVESELECT val IN (SELECT col, lin as row, val FROM sudoku) AS t
+SOLVESELECT t(val) AS (SELECT col, lin as row, val FROM sudoku)
 SUBJECTTO (SELECT val!=5 FROM t WHERE col=1 AND row=3),
           (SELECT val!=6 FROM t WHERE col=1 AND row=3)
 USING sudokusolver
