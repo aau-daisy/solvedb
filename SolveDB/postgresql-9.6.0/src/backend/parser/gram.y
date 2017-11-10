@@ -801,9 +801,11 @@ stmtmulti:	stmtmulti ';' stmt
 					/* Stmt2 vars */
 					SelectStmt *s2, *ss2;
 					ResTarget *srt2, *rt2;
-					ColumnRef *cr2, *cr22;
+					ColumnRef *cr2;
+					FuncCall * fc2;
 					CommonTableExpr *c2 = makeNode(CommonTableExpr);
 					WithClause *w2 = makeNode(WithClause);
+	   				RangeFunction *r2;
 					
 					/* Build statement 1 */ 
 
@@ -840,7 +842,7 @@ stmtmulti:	stmtmulti ';' stmt
 					s1 = makeNode(SelectStmt);
 					s1->targetList = list_make1(rt1);
 
-					/* Build statement 2: Not finished! */ 
+					/* Build statement 2 */ 
 
 					cr2 = makeNode(ColumnRef);
 					cr2->fields = list_make1(makeNode(A_Star));
@@ -864,23 +866,33 @@ stmtmulti:	stmtmulti ';' stmt
 					w2->ctes = list_make1(c2);
 					w2->location = -1;					
 
+					fc2 = makeFuncCall(
+						list_make1(makeString("sl_drop_view")),
+						list_make1(
+						     /* Third argument: the temp table name */	
+			    	 	             makeStringConst("tmp_model_eval_view", @3)
+						),
+						@3);
 
-					cr22 = makeNode(ColumnRef);
-					cr22->fields = list_make1(makeNode(A_Star));
-					cr22->location = -1;
-
-
+	   				r2 = makeNode(RangeFunction);
+					r2->lateral = false;
+					r2->ordinality = false;
+					r2->is_rowsfrom = false;
+					r2->alias = NULL;
+					r2->coldeflist = NULL;
+					r2->coldef_subquery = NULL;
+					r2->functions = list_make1(list_make2(fc2, NIL));	  /* On error, stops at the solver's name location */
+                                                                  
 					rt2 = makeNode(ResTarget);
 					rt2->name = NULL;
-					rt2->indirection = NIL;
-					rt2->val = (Node *)cr22;
-					rt2->location = -1;				
-
-
+					rt2->indirection = NULL;
+					rt2->val = (Node *)makeColumnRef("res", list_make1(makeNode(A_Star)), @3, yyscanner);
+					rt2->location = -1;									
+                                                                                                     
 					s2 = makeNode(SelectStmt);
 					s2->withClause = w2;
 					s2->targetList = list_make1(rt2);
-					s2->fromClause = list_make1(makeRangeVar(NULL, "res", -1));
+					s2->fromClause = list_make2(makeRangeVar(NULL, "res", -1), r2);
 
 					$$ = list_make2(s1, s2);
 				}
