@@ -113,7 +113,7 @@ CREATE OR REPLACE FUNCTION forecasting_solve_default(arg sl_solver_arg) RETURNS 
 					 0.0 AS pmay,  0.0 AS pjun, 0.0 AS pjul,  0.0 AS paug,  0.0 AS psep, 0.0 AS poct, 0.0 AS pnov, 
 					 0.0 AS pmon,  0.0 AS ptue, 0.0 AS pwed,  0.0 AS pthu,  0.0 AS pfri, 0.0 AS psat, 0.0 AS ptemp,
 					 0.0 AS ptemp2,0.0 AS ptempymax,	   0.0 AS pload8am FROM generate_series(0,23) phour)
-	  WITH xp, xn IN (SELECT *, 0.0 AS xp, 0.0 AS xn FROM raw_data_predictors WHERE load IS NOT NULL) AS u
+	  WITH u(xp, xn) AS (SELECT *, 0.0 AS xp, 0.0 AS xn FROM raw_data_predictors WHERE load IS NOT NULL)
 	MINIMIZE  (SELECT sum(xp + xn) FROM u) /* The LP trick to be able to minimize sum of absolute values */ 
 	SUBJECTTO (SELECT xp>=0, xn>=0 FROM u),
 		  (SELECT u.xp - u.xn =  /* Data value - Model value */ u.load - (
