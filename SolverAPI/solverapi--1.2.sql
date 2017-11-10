@@ -342,7 +342,7 @@ CREATE OR REPLACE FUNCTION sl_execute(problem sl_problem, query text) RETURNS SE
  END;
 $$ LANGUAGE plpgsql;
 
-DROP FUNCTION sl_create_execute_view(sl_problem, text, text)
+-- This function creates a view "view_name" with the resut of query "query" in the context of the problem "problem" 
 CREATE OR REPLACE FUNCTION sl_create_execute_view(problem sl_problem, query text, view_name text) RETURNS void AS $$ 
  BEGIN 	
 	EXECUTE format('CREATE OR REPLACE TEMP VIEW %s AS %s SELECT * FROM (%s) AS s', view_name, sl_get_dst_prequery(problem), query);
