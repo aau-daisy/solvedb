@@ -1121,10 +1121,11 @@ solve_problem:	opt_solve_colid_list '(' SelectStmt ')' opt_solve_inline_clause o
 				}
 		;
 
-opt_solve_colid_list:		solve_colid_list IN_P name AS	{ $$ = list_make2($1, $3); }
-				| solve_colid_list IN_P		{ $$ = list_make2($1, NULL); }
-				| name AS 			{ $$ = list_make2(NULL, $1); }
-				| /* Empty */ 			{ $$ = list_make2(NULL, NULL); }
+opt_solve_colid_list:		solve_colid_list IN_P name AS		{ $$ = list_make2($1, $3); }
+				| solve_colid_list IN_P			{ $$ = list_make2($1, NULL); }
+				| name '(' solve_colid_list ')' AS 	{ $$ = list_make2($3, $1); }
+				| name AS 				{ $$ = list_make2(NULL, $1); }
+				| /* Empty */ 				{ $$ = list_make2(NULL, NULL); }
 		;
 
 solve_colid_list: 			ColId					{ $$ = list_make1(makeStringConst($1,  @1));	}
