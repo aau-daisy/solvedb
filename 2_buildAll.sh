@@ -9,7 +9,7 @@ sudo apt-get install libreadline-dev zlib1g-dev flex bison
 cd $DIR/SolveDB/postgresql-9*
 
 # make clean
-./configure
+./configure --with-python
 make -j 2
 sudo make install
 PATH=/usr/local/pgsql/bin:$PATH
