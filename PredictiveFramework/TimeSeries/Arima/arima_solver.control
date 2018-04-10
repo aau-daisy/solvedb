@@ -1,0 +1,7 @@
+# ARIMA solver extension
+comment = 'ARIMA solver for PostreSQL 9.6 (by Davide)'
+default_version = '1.0'
+module_pathname = '$libdir/arima_solver'
+requires = 'solverapi, predictive_api'
+relocatable = false
+schema = public

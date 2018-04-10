@@ -1,0 +1,9 @@
+run install.sh
+in a SQL terminal write
+
+drop extension if exists predictive_api cascade;
+create extension predictive_api;
+drop extension if exists predictive_solver cascade;
+create extension predictive_solver cascade;
+drop extension if exists arima_solver cascade;
+create extension arima_solver cascade;
