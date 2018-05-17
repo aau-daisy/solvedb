@@ -110,6 +110,7 @@ DECLARE
 	predictions		numeric[];
 	ts_training_test		jsonb;		--temporary containers for result tables (use GD)
 	ml_training_test	jsonb;	
+	chosen_method_type	text;
 	timeFrequency		int := null;
      
 BEGIN       
@@ -267,12 +268,13 @@ BEGIN
 ---------------------------------------- ////// END SETUP	------------------------------------
 
 
--- 	if test_ts_methods THEN
--- 		select sl_time_series_models_handler(arg, target_column_name, target_column_type, 
--- 			attStartTime, attEndTime, timeFrequency, final_ts_features[0], 
--- 			input_table_tmp_name, results_table, ts_methods_to_test, attPredictions) 
--- 			into training_test;	
--- 	END IF;
+	if test_ts_methods THEN
+		select sl_time_series_models_handler(arg, target_column_name, target_column_type, 
+			attStartTime, attEndTime, timeFrequency, final_ts_features[0], 
+			input_table_tmp_name, results_table, ts_methods_to_test, attPredictions) 
+			into ts_training_test;	
+	END IF;
+	
 	if test_ml_methods THEN
 		SELECT sl_ml_models_handler(arg, target_column_name, target_column_type, 
 			attStartTime, attEndTime, timeFrequency, final_ts_features[0],
@@ -304,38 +306,46 @@ BEGIN
 	raise notice 'Parameters for the method: %', tmp_string;
 	raise notice 'The method has given a RMSE of % on the training data', tmp_numeric;
 	PERFORM sl_set_print_model_summary_on();
-	
-	training_data_query := format('SELECT * FROM %s', ml_training_test->'training');
-	test_data_query := format('SELECT * FROM %s', ml_training_test->'test');
-	EXECUTE format('SELECT count(*) FROM %s', ml_training_test->'test') into i;
 
-
--- 		get results if chosen method is TS
--- -- -- -- 	EXECUTE format('SELECT %s(%s time_column_name:=%L, target_column_name:=%L, training_data:=%L, 
--- -- -- -- 			number_of_predictions:=%s)',
--- -- -- -- 			chosen_method,
--- -- -- -- 			tmp_string, 
--- -- -- -- 			input_time_col_names[0],
--- -- -- -- 			target_column_name,
--- -- -- -- 			training_data_query,
--- -- -- -- 			i) into predictions;
-
---		get results if chosen method is ML:
-	execute format('SELECT %s(%s features := %L, time_feature := %L, 
-						target_column_name := %L, 
-						training_data := %L, test_data := %L,
-						number_of_predictions := %s)',
+	execute format('select type::text from sl_pr_method where funct_name = %L',
+					chosen_method) into chosen_method_type;
+	CASE 
+	WHEN chosen_method_type = 'ts' then
+		training_data_query := format('SELECT * FROM %s', ts_training_test->'training');
+		test_data_query := format('SELECT * FROM %s', ts_training_test->'test');
+		EXECUTE format('SELECT count(*) FROM %s', ts_training_test->'test') into i;
+	--	get results if chosen method is TS
+		EXECUTE format('SELECT %s(%s time_column_name:=%L, target_column_name:=%L, training_data:=%L, 
+				number_of_predictions:=%s)',
 				chosen_method,
 				tmp_string, 
-				final_ml_features,
 				input_time_col_names[0],
 				target_column_name,
 				training_data_query,
-				test_data_query,
 				i) into predictions;
+	WHEN chosen_method_type = 'ml' then
+		training_data_query := format('SELECT * FROM %s', ml_training_test->'training');
+		test_data_query := format('SELECT * FROM %s', ml_training_test->'test');
+		EXECUTE format('SELECT count(*) FROM %s', ml_training_test->'test') into i;
+		--		get results if chosen method is ML:
+		execute format('SELECT %s(%s features := %L, time_feature := %L, 
+			target_column_name := %L, 
+			training_data := %L, test_data := %L,
+			number_of_predictions := %s)',
+			chosen_method,
+			tmp_string, 
+			final_ml_features,
+			input_time_col_names[0],
+			target_column_name,
+			training_data_query,
+			test_data_query,
+			i) into predictions;
+	WHEN chosen_method_type = 'custom' then
+		raise notice 'custom method are not supported';
+	ELSE
+	END CASE;
 
 
- 
 
 	tmp_string_array := '{}';
 -- 	Write the predictions in the final table
@@ -367,11 +377,9 @@ BEGIN
 				input_time_col_names[0],
 				tmp_string_array[i]
 				);
-
 	END LOOP;
 
         RETURN QUERY EXECUTE sl_return(arg, sl_build_out(arg));
         perform sl_drop_view_cascade(input_table_tmp_name);
 END;
 $$ LANGUAGE plpgsql STRICT;
-

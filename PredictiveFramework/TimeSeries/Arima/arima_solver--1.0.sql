@@ -202,10 +202,12 @@ AS $$
 	except Exception as ex:
 		plpy.notice('------ARIMA model cannot be fit with parameters')
 		plpy.warning(format(ex))
-		predictions = np.array(y_train[len(y_train) - number_of_predictions:len(y_train)])
+		#predictions = np.array(y_train[len(y_train) - number_of_predictions:len(y_train)])
+		predictions = np.zeros(number_of_predictions)
 	except ValueError as err:
 		plpy.notice('------ARIMA model cannot be fit with parameters')
 		plpy.warning(format(err))
+		#predictions = np.zeros(number_of_predictions)
 		predictions = np.array(y_train[len(y_train) - number_of_predictions:len(y_train)])
 	#--check for predictions that are nan
 	for pr in range(len(predictions)):
