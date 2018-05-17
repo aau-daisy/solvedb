@@ -2,5 +2,6 @@
 comment = 'A predictive API for PostreSQL 9.6 (by Davide)'
 default_version = '1.0'
 module_pathname = '$libdir/predictive_api'
+requires = 'solverapi'
 relocatable = false
 schema = public

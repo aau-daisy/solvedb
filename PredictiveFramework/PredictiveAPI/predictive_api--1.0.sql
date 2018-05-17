@@ -59,6 +59,7 @@ create table sl_pr_solver_method
 
 
 -- This defines the supported types for time series features
+drop type if exists sl_supported_time_types;
 CREATE TYPE sl_supported_time_types AS ENUM ('timestamp', 
                     'timestamp without time zone',
                     'timestamp with time zone',
@@ -222,14 +223,16 @@ $$ language plpythonu;
 
 
 
-drop function if exists separate_input_relation_on_time_range(name, name, text, int, text, text, text, int);
+drop function if exists separate_input_relation_on_time_range(name, name, text, int, 
+								text, text, text, int);
 
-CREATE FUNCTION separate_input_relation_on_time_range(target name, id name, time_column_name text, frequency int, 
-            table_name text, starting_time text, ending_time text, number_of_predictions int) RETURNS text
+CREATE OR REPLACE FUNCTION separate_input_relation_on_time_range(target name, id name, 
+			time_column_name text, frequency int, 
+			table_name text, starting_time text, ending_time text, number_of_predictions int) 
+RETURNS text
 AS $$
     import dateutil.parser as parser
     from datetime import timedelta
-
 
     # if the user has not specified a frequency find most probable interval between samples in time series
     if frequency < 0:
@@ -260,10 +263,11 @@ AS $$
     if number_of_rows_to_fill < 1:
         plpy.error("Wrong time interval for prediction");
 
+    
+
     #rv = plpy.execute("select count(*) as the_count from (select " + time_column_name + " from "  + table_name + " where " + time_column_name + " >= \'" + str(starting_datetime) + "\' and " + time_column_name + " <= \'" + str(ending_datetime) + "\' order by " + time_column_name + " asc) as b")
     #number_of_rows_to_fill_already_in_table = int(rv[0]['the_count'])
-    
-    
+
     # create temporary table with rows to fill
     rv = plpy.execute("select max(" + id + ") as id from " + table_name)
     last_existing_id = rv[0]['id']
@@ -273,16 +277,14 @@ AS $$
     for line in rv:
         last_date = parser.parse(line[time_column_name])
 
-    plpy.notice(last_date)
+    
     lines_for_view = []
     
     for i in range(number_of_rows_to_fill):
-        curr_time = (last_date + timedelta(seconds=i * most_probable_frequency))
-        plpy.notice("line: " + str(curr_time))
+        curr_time = (last_date + timedelta(seconds=(i+1) * most_probable_frequency))
         last_existing_id += i + 1
-        if i > 0:
-            lines_for_view.append({'id': (last_existing_id),'time':str(curr_time), 'value':'null', 'fill':True})
-    
+        lines_for_view.append({'id': (last_existing_id),'time':str(curr_time), 'value':'null', 'fill':True})
+
     # add the already existing rows
     #for line in times_already_in:
     #    last_existing_id += i + 1
@@ -337,7 +339,6 @@ BEGIN
 	query := query || target_table_name;     
 	execute query into c ;
 	-- check that the table contains data to fill
-	raise notice 'empty data: %', c;
 	IF c = 0 THEN
 		RETURN null;
 	ELSE
@@ -370,7 +371,6 @@ BEGIN
 			target_column_name);
 	query := query || target_table_name;     
 	execute query into c ;
-	raise notice 'full data: %', c;
 	-- check that the table contains data to fill
 	IF c = 0 THEN
 		RETURN null;
@@ -478,16 +478,21 @@ $$ LANGUAGE plpythonu;
 -- returns the names of the tables where the results have been written
 drop function if exists sl_time_series_models_handler(sl_solver_arg, 
 		 name,  text,
-		 text,  text,  text,  text, 
-		 name,  text,  text[]);
+		text, text, int, text,
+		 name,  text,  text[], int);
+-- CREATE OR REPLACE FUNCTION sl_time_series_models_handler(arg sl_solver_arg, 
+-- 		target_column_name name, target_column_type text,
+-- 		attStartTime text, attEndTime text, attFrequency text, time_feature text, 
+-- 		input_table_tmp_name name, results_table text, ts_methods_to_test text[],
+-- 		attPredictions int)
 CREATE OR REPLACE FUNCTION sl_time_series_models_handler(arg sl_solver_arg, 
 		target_column_name name, target_column_type text,
-		attStartTime text, attEndTime text, attFrequency text, time_feature text, 
+		attStartTime text, attEndTime text, timeFrequency int, time_feature text, 
 		input_table_tmp_name name, results_table text, ts_methods_to_test text[],
 		attPredictions int)
 RETURNS text AS $$
 DECLARE
-	timeFrequency		int := null;
+-- 	timeFrequency		int := null;
 	tmp_string_array 	text[] := '{}';
 	ts_target_tables	name[] := '{}';
 	ts_training_tables	name[] := '{}';
@@ -505,51 +510,6 @@ DECLARE
 	predictions		numeric[];
 
 BEGIN
--- 	check time arguments (if time columns are present in the table)
-	if time_feature is null THEN
-		RAISE EXCEPTION 'No time columns present in the given Table. 
-					Impossible to process time series.';
-	END IF;
-	
-	IF attStartTime IS NOT NULL THEN
-		attStartTime = convert_date_string(attStartTime);
-		IF attStartTime IS NULL THEN
-			RAISE EXCEPTION 'Given START TIME is not a recognizable time format, or the date is incorrect.';
-		END IF;
-	END IF;
-	
-	IF attEndTime IS NOT NULL THEN
-		attEndTime = convert_date_string(attEndTime);
-		IF attEndTime IS NULL THEN
-			RAISE EXCEPTION 'Given END TIME is not a recognizable time format, or the date is incorrect.';
-		END IF;
-	END IF;
-	
- 	BEGIN
-		IF attFrequency IS NOT NULL THEN
-			timeFrequency := attFrequency::int; 
-		ELSE	
-			timeFrequency := -1;
-		END IF;
-		tmp_string := 'select ' || target_column_name || ' from ' || input_table_tmp_name || ' where ' || target_column_name || ' is not null limit 1';
-		execute tmp_string into tmp_numeric;
-	EXCEPTION
-		WHEN SQLSTATE '22P02' THEN
-			RAISE EXCEPTION 'Impossible to parse given argument/s';
-	END;
-	
-	IF (attStartTime IS NOT NULL AND attEndTime IS NULL) OR (attStartTime IS NULL AND attEndTime IS NOT NULL) THEN
-		RAISE EXCEPTION 'Prediction time interval needs to be defined with <start,end> as 
-			start_time:="your_start_time", end_time:="your_end_time"';
-	END IF;
-	IF (attStartTime IS NOT NULL AND attEndTime IS NOT NULL) AND attStartTime > attEndTime THEN
-		RAISE EXCEPTION 'Error in given time interval: start_time > end_time.';
-	END IF;
-	IF attPredictions IS NOT NULL AND attPredictions <= 0 THEN
-		RAISE EXCEPTION 'Error: parameter number of predictions must be >= 1';
-	END IF;
-
-
 -- 	separate training data from target data, depending if on NULL rows, or on time range
 	tmp_string_array := '{}';
 	tmp_string_array := tmp_string_array || time_feature;
@@ -562,6 +522,7 @@ BEGIN
 	IF tmp_name is null THEN 
 		RAISE EXCEPTION 'Error in prediction interval and input time series';
 	END IF;
+
 	ts_target_tables := ts_target_tables || tmp_name;
 	tmp_name := sl_build_view_except_from_sql(input_table_tmp_name, tmp_name,
 				arg.tmp_id, tmp_string_array, time_feature);
@@ -598,7 +559,6 @@ BEGIN
 		tmp_numeric_array := sl_extract_column_to_array(tmp_string, target_column_name);
 
 		for i in 1..array_length(ts_methods_to_test,1) LOOP
-			raise notice 'Training: %', ts_methods_to_test[i];
 			-- get user defined parameter to test
 			for tmp_record in execute format('select a.name::text, type, value_default, value_min, value_max
 						from sl_pr_parameter as a
@@ -615,7 +575,6 @@ BEGIN
 				method_parameters := method_parameters || (tmp_record.name, tmp_record.type, tmp_record.value_default,
 										tmp_record.value_min, tmp_record.value_max)::sl_method_parameter_type;
 			END LOOP;
-			raise notice 'method_parameters %', method_parameters;
 			-- FIT method as SOLVESELECT rewriting into optimization problem using solversw)
 			-- tmp_string contains the pairs param:=value of the trained model, to be formatted
 			tmp_string := sl_convert_ts_fit_to_solveselect(time_feature, target_column_name, 
@@ -633,8 +592,8 @@ BEGIN
 
 			
 			-- run again to get the RMSE of the trained model
-			EXECUTE format('SELECT %s(%s, time_column_name:=%L, target_column_name:=%L, training_data:=%L, 
-								number_of_predictions:=%s)',
+			EXECUTE format('SELECT %s(%s, time_column_name:=%L, target_column_name:=%L, 
+						training_data:=%L, number_of_predictions:=%s)',
 			ts_methods_to_test[i],
 			tmp_string, 
 			time_feature,
@@ -652,7 +611,7 @@ BEGIN
 		END LOOP;
 	END LOOP;
 
-	-- return the tables where the results of the models have been written
+	-- return the tables where the training and target sets have been saved
 	return format('{"training" : "%s", "test" : "%s"}',
 		ts_training_tables[1], ts_target_tables[1]);
 END;
@@ -660,22 +619,25 @@ $$ language plpgsql;
 
 
 
-
 --------------------------MACHINE LEARNING MODELS HANDLER
 --TODO work in progress
+
 drop function if exists sl_ml_models_handler(sl_solver_arg, 
 		 name,  text,
-		 text[],  name,  text, text[], int);
+		 text, text, int, text,
+		 text[], name,  text, text[], int, int);
 CREATE OR REPLACE FUNCTION sl_ml_models_handler(arg sl_solver_arg, 
-		target_column_name name, target_column_type text, final_ml_features text[],
-		input_table_tmp_name name, results_table text, ml_methods_to_test text[],
-		k int)
+		target_column_name name, target_column_type text,
+		attStartTime text, attEndTime text, timeFrequency int, time_feature text,
+		final_ml_features text[],
+		input_table_tmp_name name, results_table text, methods_to_test text[], 
+		nPredictions int, k int)
 RETURNS text AS $$
 
 DECLARE
 	tmp_string_array	text[] := '{}';
-	ml_target_table		name;
-	ml_training_table	name;
+	target_tables		name[] := '{}';
+	training_tables		name[] := '{}';
 	i		        int;		-- tmp index   
 	tmp_string		text;
 	input_length		int;		-- temporary int value
@@ -684,202 +646,133 @@ DECLARE
 	tmp_numeric 		numeric;
 	parameters 		text := '';
 	predictions		numeric[];
-
-
+	tmp_name 		name;
+	training_sets		text[] := '{}'; 
+	test_sets		text[] := '{}'; 
+	method_parameters	sl_method_parameter_type[] := '{}';
+	tmp_integer		integer;
+	tmp_numeric_array	numeric[] := '{}';
+	tmp_record		record;
 BEGIN
 
-	-- split into training data (with filled target column) and target data 
-	-- (with empty target column/given time range)
-	-- separate traning data from target data
-	tmp_string_array := final_ml_features;
-	tmp_string_array := tmp_string_array ||  arg.tmp_id::text;
-	ml_target_table := separate_input_relation_on_empty_rows(target_column_name, tmp_string_array, 
-					input_table_tmp_name);
-	IF ml_target_table is null THEN 
-		RAISE EXCEPTION 'No rows to fill in the given Table. 
-					Model training/saving not yet implemented.';
-	END IF;
-	ml_training_table := separate_input_relation_on_full_rows(target_column_name, tmp_string_array, 
-					input_table_tmp_name);
-	IF ml_training_table is null THEN
-		RAISE EXCEPTION 'No rows for training in the given Table. 
-			All rows have null values for the specified target.';
+
+	-- separate training data from target data, depending if on NULL rows, or on time range
+	tmp_string_array := '{}';
+	tmp_string_array := tmp_string_array || time_feature;
+	tmp_string_array := tmp_string_array || arg.tmp_id::text || target_column_name::text;
+
+	-- generate training data tables and target data tables
+	tmp_name := separate_input_relation_on_time_range(target_column_name, arg.tmp_id, 
+			time_feature, timeFrequency, input_table_tmp_name, 
+			attStartTime, attEndTime, nPredictions);
+	
+	IF tmp_name is null THEN 
+		RAISE EXCEPTION 'Error in prediction interval and input time series';
 	END IF;
 
-	-- ML METHODS: create K views for k cross folding on the training data 
-	-- TO DO: PUSH IT INSIDE THE METHOD, AS THE FEATURE SELECTION WILL PROJECT SOME OF THE COLUMNS
--- 	execute 'SELECT COUNT(*) FROM ' || ml_training_table into input_length;
--- 	for i in 0..(k-1) loop
--- 		tmp_string := sl_get_unique_tblname() || 'ml_cross_test_' || i;
--- 		EXECUTE format('CREATE OR REPLACE TEMP VIEW %s (%s,%s) AS SELECT %s,%s 
--- 				FROM %s LIMIT (%s) OFFSET (%s)', 
--- 			tmp_string,
--- 			(SELECT string_agg(format('%s',quote_ident(final_ml_features[j])), ',')
--- 			FROM generate_subscripts(final_ml_features, 1) AS j),
--- 			target_column_name,
--- 			(SELECT string_agg(format('%s',quote_ident(final_ml_features[j])), ',')
--- 			FROM generate_subscripts(final_ml_features, 1) AS j),
--- 			target_column_name,
--- 			ml_training_table,
--- 			input_length/k,
--- 			i * (input_length/k));
--- 		kCrossTestViews := kCrossTestViews || tmp_string;
--- 		tmp_string := sl_get_unique_tblname() || 'ml_cross_training_' || i;
--- 		EXECUTE format('CREATE OR REPLACE TEMP VIEW %s (%s, %s) AS SELECT %s, %s from %s EXCEPT SELECT * FROM %s',
--- 			tmp_string,
--- 			(SELECT string_agg(format('%s',quote_ident(final_ml_features[j])), ',')
--- 			FROM generate_subscripts(final_ml_features, 1) AS j),
--- 			target_column_name,
--- 			(SELECT string_agg(format('%s',quote_ident(final_ml_features[j])), ',')
--- 			FROM generate_subscripts(final_ml_features, 1) AS j),
--- 			target_column_name,
--- 			ml_training_table,
--- 			kCrossTestViews[i+1]);
--- 		 kCrossTrainingViews := kCrossTrainingViews || tmp_string;
--- 	end loop;
+	target_tables := target_tables || tmp_name;
+	tmp_name := sl_build_view_except_from_sql(input_table_tmp_name, tmp_name,
+				arg.tmp_id, tmp_string_array, time_feature);
+	IF tmp_name is null THEN
+		RAISE EXCEPTION 'Error with time series: no data for model training (possibly wrong prediction interval).';
+	END IF;
+	training_tables := training_tables || tmp_name;
 
-	-- TODO handle ml methods
-	
-	raise notice 'ml handler ready';
-	-- format the param:= value pairs
-	execute format('select lr_predict(features := %L,
-	 target_column_name := %L, training_data := %L, test_data := %L)', 
-		'',
-		'pvsupply', 
-		('select * from ' || ml_training_table),
-		('select * from ' || ml_target_table)) into predictions;
-	tmp_numeric := 0;
-	
+--	split the training set into 70/30% for training test data
+	for i in 1.. array_length(training_tables, 1) LOOP
+		execute 'SELECT COUNT(*) FROM ' || training_tables[i] into tmp_integer;
+		tmp_string  := sl_get_unique_tblname() || '_pr_ts_training';
+		EXECUTE format('CREATE TEMP VIEW %s AS SELECT %s,%s FROM %s LIMIT %s',
+			tmp_string,
+			time_feature,
+			target_column_name,
+			training_tables[i],
+			((tmp_integer::numeric/100.0) * 70.0)::int);
+		training_sets := training_sets || tmp_string;
+		tmp_string  := sl_get_unique_tblname() || '_pr_ts_test';
+		EXECUTE format('CREATE TEMP VIEW %s AS SELECT %s,%s FROM %s OFFSET %s',
+			tmp_string,
+			time_feature,
+			target_column_name,
+			training_tables[i],
+			((tmp_integer::numeric/100.0) * 70.0)::int);
+		test_sets := test_sets || tmp_string;
+	END LOOP;
+
+--	perform the training of the models
+	for tmp_integer in 1..array_length(training_sets, 1) LOOP
+		-- create test values from the test set
+		tmp_string := 'SELECT * FROM ' || test_sets[tmp_integer];
+		tmp_numeric_array := sl_extract_column_to_array(tmp_string, target_column_name);
+
+		for i in 1..array_length(methods_to_test, 1) LOOP
+			-- get user defined parameter to test
+			for tmp_record in execute format('select a.name::text, type, value_default, 
+						value_min, value_max
+						from sl_pr_parameter as a
+						inner join
+						sl_pr_method_param as b
+						on a.pid = b.pid
+						where b.mid in 
+						(
+						select mid
+						from sl_pr_method
+						where funct_name = %L)',
+						methods_to_test[i])
+			LOOP
+				method_parameters := method_parameters || 
+				(tmp_record.name, tmp_record.type, tmp_record.value_default,
+				tmp_record.value_min, tmp_record.value_max)::sl_method_parameter_type;
+			END LOOP;
+
+-- -- 			if there are parameters to optimize, use a SOLVESELECT query
+			tmp_string = '';
+			if array_length(method_parameters, 1) > 0 THEN
+				-- FIT method as SOLVESELECT rewriting into optimization problem using solversw)
+				-- tmp_string contains the pairs param:=value of the trained model, 
+				-- to be formatted
+				tmp_string := sl_convert_ts_fit_to_solveselect(time_feature, target_column_name, 
+						training_sets[tmp_integer], tmp_numeric_array,
+						methods_to_test[i], method_parameters);
+				-- format the param := value pairs
+				tmp_string_array := string_to_array(tmp_string, ',');
+				tmp_string := format('%s,',
+					(SELECT string_agg(format('%s := %s',
+						(method_parameters[j]).name,
+						tmp_string_array[j]), ',')
+					FROM generate_subscripts(method_parameters, 1) AS j));
+			END IF;
+
 			
-	EXECUTE format('INSERT INTO %s(method, parameters, result) VALUES (%L, %L, %s)',
-	results_table,
-	'lr_predict',
-	tmp_string,
-	tmp_numeric);	
-	-- return the training_test tables
-	return format('{"training" : "%s", "test" : "%s"}',
-		ml_training_table, ml_target_table);
+			-- run again to get the RMSE of the trained model
+			execute format('SELECT %s(%s features := %L, time_feature := %L, 
+						target_column_name := %L, 
+						training_data := %L, test_data := %L,
+						number_of_predictions := %s)',
+				methods_to_test[i],
+				tmp_string, 
+				final_ml_features,
+				time_feature,
+				target_column_name,
+				('select * from ' || training_sets[tmp_integer]),
+				('select * from ' || test_sets[tmp_integer]),
+				array_length(tmp_numeric_array,1)) into predictions;					
+			tmp_numeric := sl_evaluation_rmse(tmp_numeric_array, predictions);
 
+			EXECUTE format('INSERT INTO %s(method, parameters, result) VALUES (%L, %L, %s)',
+			results_table,
+			methods_to_test[i],
+			tmp_string,
+			tmp_numeric);	
+		END LOOP;
+	END LOOP;
+
+	-- return tables where training and target sets have been written
+	return format('{"training" : "%s", "test" : "%s"}',
+		training_tables[1], target_tables[1]);
 END;
 $$ language plpgsql;
+
+
+
 ---------------------------------------------------------------------------------------
-
-----------SPECIFIC PREDICTIVE METHODS CAN GO HERE, OR INSTALLED SEPARATELY VIA SQL
--- METHOD USER BY THE arima_solver
--- training_data/test_data: 	sql views
--- returns an array with the predicted values
-DROP FUNCTION IF EXISTS arima_predict(int,int, int,  int, text, text, text, int);
-CREATE OR REPLACE FUNCTION arima_predict(time_window int, p int, d int, q int, time_column_name text,
- target_column_name text, training_data text, number_of_predictions int)
-RETURNS NUMERIC[]
-AS $$
-	import pandas as pd
-	import statsmodels.api as sm
-	import numpy as np
-	from datetime import datetime
-	import sys
-	from sklearn.metrics import mean_squared_error
-	from math import sqrt
-	import math
-	from pandas import DataFrame
-	import dateutil.parser as parser
-
-	
-	training_time	= []
-	training_target	= []
-
-	rv = plpy.execute(training_data)
-	for x in rv:
-		training_target.append(x[target_column_name])
-		training_time.append(parser.parse(x[time_column_name]));
-
-	
-	x_train = np.array(training_time)
-	y_train = np.array(training_target)
-
-	series = pd.Series(y_train[int(len(y_train) - (len(y_train) / float(100) * time_window)):len(y_train)],
-                            x_train[int(len(x_train) - (len(x_train) / float(100) * time_window)):len(x_train)])
-
-                    
-	try:
-		arima_mod = sm.tsa.ARIMA(series.astype(float), order=(p,d,q))
-		arima_res = arima_mod.fit()
-		predictions = arima_res.forecast(number_of_predictions)[0]
-
-		#if needed print information about the model to the client
-		if GD["print_model_summary"]:
-			plpy.notice(arima_res.summary())
-			residuals = DataFrame(arima_res.resid)
-			plpy.notice('-------ARIMA Residuals Description-------')
-			plpy.notice(residuals.describe())
-		
-	except Exception as ex:
-		plpy.notice('------ARIMA model cannot be fit with parameters')
-		plpy.warning(format(ex))
-		predictions = np.array(y_train[len(y_train) - number_of_predictions:len(y_train)])
-	except ValueError as err:
-		plpy.notice('------ARIMA model cannot be fit with parameters')
-		plpy.warning(format(err))
-		predictions = np.array(y_train[len(y_train) - number_of_predictions:len(y_train)])
-	#--check for predictions that are nan
-	for pr in range(len(predictions)):
-		if math.isnan(predictions[pr]):
-			plpy.warning('prediction is nan')
-			predictions[pr] = np.mean(np.array(y_train[len(y_train) - number_of_predictions:len(y_train)]))
-	
-	return predictions.tolist();
-
-$$ LANGUAGE plpythonu; 
----------------------------------
---Method for linear_regression_solver
-DROP FUNCTION IF EXISTS lr_predict(text, text, text, text);
-CREATE OR REPLACE FUNCTION lr_predict(features text,
- target_column_name text, training_data text, test_data text)
-RETURNS NUMERIC[]
-AS $$
-	import numpy as np
-	import math
-	from sklearn import linear_model
-	train_x	= []
-	train_y	= []
-	test_x  = []
-	rv = plpy.execute(training_data)
-	features = ["outtemp","month"]
-
-	plpy.notice("linear method")
-	
-	for x in rv:
-		f_list = []
-		for feature in features:
-			f_list.append(x[feature])
-		train_x.append(f_list)
-		train_y.append(x[target_column_name])
-
-	rv = plpy.execute(test_data)
-	for x in rv:
-		f_list = []
-		for feature in features:
-			f_list.append(x[feature])
-		test_x.append(f_list)           
-	
-	regr = linear_model.LinearRegression().fit(train_x, train_y)
-	predictions = regr.predict(test_x)
-	#if needed print information about the model to the client
-	if GD["print_model_summary"]:
-		plpy.notice("Coefficients: ", regr.coef_)
-		plpy.notice("Score: ", regr.score(train_x, train_y))
-	#except Exception as ex:
-	#	#plpy.warning(format(ex))
-	#	predictions = np.array(y_train[len(y_train) - number_of_predictions:len(y_train)])
-	#except ValueError as err:
-	#	#plpy.warning(format(err))
-	#	predictions = np.array(y_train[len(y_train) - number_of_predictions:len(y_train)])
-	#--check for predictions that are nan
-	for pr in range(len(predictions)):
-		if math.isnan(predictions[pr]):
-			plpy.notice("is nan");
-			predictions[pr] = np.mean(np.array(y_train[len(y_train) - number_of_predictions:len(y_train)]))
-	return predictions.tolist();
-$$ LANGUAGE plpythonu;
-
-

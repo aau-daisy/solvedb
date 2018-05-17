@@ -101,14 +101,16 @@ DECLARE
 	tmp_string		text;
 -- 	method 			VARCHAR[];
 	training_data_query 	text;
+	test_data_query		text;
 	tmp_record		record;
 	results_table		text := sl_build_pr_results_table();
 	chosen_method		text;
 
 	-- for testing only
 	predictions		numeric[];
-	training_test		jsonb;		--temporary containers for result tables (use GD)
+	ts_training_test		jsonb;		--temporary containers for result tables (use GD)
 	ml_training_test	jsonb;	
+	timeFrequency		int := null;
      
 BEGIN       
 	--------//////     	SETUP		////-------------------------------
@@ -129,9 +131,7 @@ BEGIN
 	attEndTime       	= sl_param_get_as_text(arg, 'end_time');
 	attFrequency       	= sl_param_get_as_text(arg, 'frequency');
 	attPredictions		= sl_param_get_as_int(arg,  'predictions');
-	--adjust attPredictions to +1 so that it handles all time series frequencies
-	-- DEBUG: why is attPredictions increased by 1?
-	attPredictions = attPredictions + 1;
+		
 	
 	-- check the ensamble of forecasting methods to test (from input or default)
 	IF attMethods is null THEN
@@ -194,7 +194,7 @@ BEGIN
 
 	 -- set the user defined features (if found)
 	IF attFeatures IS NULL THEN
-		-- NOTHING, THE FEATURE SELECTOR WILL CHOOSE THE FEATURES
+		-- no user given features
 		final_ts_features := input_time_col_names;
 		final_ml_features := input_feature_col_names;
 	ELSE
@@ -216,23 +216,87 @@ BEGIN
 	END IF;
 
 
----------------------------------------- ////// END SETUP	---------------------------------------------------------
-	if test_ts_methods THEN
-		select sl_time_series_models_handler(arg, target_column_name, target_column_type, attStartTime, 
-			attEndTime, attFrequency, final_ts_features[0], input_table_tmp_name, 
-			results_table, ts_methods_to_test, attPredictions) into training_test;	
+	-------------------------------------------------------------------------------
+	-- check time arguments (if time columns are present in the table)
+	if final_ts_features[0] is null THEN
+		RAISE EXCEPTION 'No time columns present in the given Table. 
+					Impossible to process time series.';
 	END IF;
-	--IF test_ml_methods THEN
-	--	SELECT sl_ml_models_handler(arg, target_column_name, target_column_type, 
-	--		input_table_tmp_name, results_table, ml_methods_to_test, k) into ml_training_test;
-	--END IF;
+	
+	IF attStartTime IS NOT NULL THEN
+		attStartTime = convert_date_string(attStartTime);
+		IF attStartTime IS NULL THEN
+			RAISE EXCEPTION 'Given START TIME is not a recognizable time format, 
+			or the date is incorrect.';
+		END IF;
+	END IF;
+	
+	IF attEndTime IS NOT NULL THEN
+		attEndTime = convert_date_string(attEndTime);
+		IF attEndTime IS NULL THEN
+			RAISE EXCEPTION 'Given END TIME is not a recognizable time format, 
+			or the date is incorrect.';
+		END IF;
+	END IF;
+	
+ 	BEGIN
+		IF attFrequency IS NOT NULL THEN
+			timeFrequency := attFrequency::int; 
+		ELSE	
+			timeFrequency := -1;
+		END IF;
+		tmp_string := 'select ' || target_column_name || ' from ' || input_table_tmp_name 
+		|| ' where ' || target_column_name || ' is not null limit 1';
+		execute tmp_string into tmp_numeric;
+	EXCEPTION
+		WHEN SQLSTATE '22P02' THEN
+			RAISE EXCEPTION 'Impossible to parse given argument/s';
+	END;
+	
+	IF (attStartTime IS NOT NULL AND attEndTime IS NULL) OR (attStartTime IS NULL 
+		AND attEndTime IS NOT NULL) THEN
+		RAISE EXCEPTION 'Prediction time interval needs to be defined with <start,end> as 
+			start_time:="your_start_time", end_time:="your_end_time"';
+	END IF;
+	IF (attStartTime IS NOT NULL AND attEndTime IS NOT NULL) AND attStartTime > attEndTime THEN
+		RAISE EXCEPTION 'Error in given time interval: start_time > end_time.';
+	END IF;
+	IF attPredictions IS NOT NULL AND attPredictions <= 0 THEN
+		RAISE EXCEPTION 'Error: parameter number of predictions must be >= 1';
+	END IF;
+---------------------------------------- ////// END SETUP	------------------------------------
 
--- 	look in the results table the model with the best result
+
+-- 	if test_ts_methods THEN
+-- 		select sl_time_series_models_handler(arg, target_column_name, target_column_type, 
+-- 			attStartTime, attEndTime, timeFrequency, final_ts_features[0], 
+-- 			input_table_tmp_name, results_table, ts_methods_to_test, attPredictions) 
+-- 			into training_test;	
+-- 	END IF;
+	if test_ml_methods THEN
+		SELECT sl_ml_models_handler(arg, target_column_name, target_column_type, 
+			attStartTime, attEndTime, timeFrequency, final_ts_features[0],
+			final_ml_features,---todo: cheak features here!
+			input_table_tmp_name, results_table, ml_methods_to_test, attPredictions, k) 
+			INTO ml_training_test;
+	END IF;
+
+
+	
+
+-- 	look in the results table for time series the model with the best result
 -- 	result table contains the followiing values [method text, parameters json, result numeric]
 --	find the best model method
-	execute format('select method from %s where result is not null order by result desc limit 1', results_table) into chosen_method;
-	execute format('select result from %s where result is not null order by result desc limit 1', results_table) into tmp_numeric;
-	execute format('select parameters from %s where result is not null order by result desc limit 1', results_table) into tmp_string;
+	execute format('select method from %s where result is not null order by result desc limit 1', 
+		results_table) into chosen_method;
+	execute format('select result from %s where result is not null order by result desc limit 1', 
+			results_table) into tmp_numeric;
+	execute format('select parameters from %s where result is not null order by result desc limit 1',
+			results_table) into tmp_string;
+
+	if char_length(tmp_string) > 0 then
+		tmp_string := tmp_string || ',';
+	end if;
 
 	--PRINT INFORMATION FOR THE USER
 	raise notice '---------------------------------------------';
@@ -240,44 +304,51 @@ BEGIN
 	raise notice 'Parameters for the method: %', tmp_string;
 	raise notice 'The method has given a RMSE of % on the training data', tmp_numeric;
 	PERFORM sl_set_print_model_summary_on();
-
 	
-	training_data_query := format('SELECT * FROM %s', training_test->'training');
+	training_data_query := format('SELECT * FROM %s', ml_training_test->'training');
+	test_data_query := format('SELECT * FROM %s', ml_training_test->'test');
+	EXECUTE format('SELECT count(*) FROM %s', ml_training_test->'test') into i;
 
-	--check what is in the training set: DONE, CORRECT!
-	--for tmp_record in execute format ('SELECT * FROM %s', training_test->'training')
-	--loop
-	--	raise notice 'record %', tmp_record;
-	--end loop;
 
-	EXECUTE format('SELECT count(*) FROM %s', training_test->'test') into i;
-	-- DEBUG: ceck size of test set (it should be equal to n. of predictions): DONE, CORRECT!
-	--raise notice '------test set size: %', i;
+-- 		get results if chosen method is TS
+-- -- -- -- 	EXECUTE format('SELECT %s(%s time_column_name:=%L, target_column_name:=%L, training_data:=%L, 
+-- -- -- -- 			number_of_predictions:=%s)',
+-- -- -- -- 			chosen_method,
+-- -- -- -- 			tmp_string, 
+-- -- -- -- 			input_time_col_names[0],
+-- -- -- -- 			target_column_name,
+-- -- -- -- 			training_data_query,
+-- -- -- -- 			i) into predictions;
 
-	raise notice 'chosen method: %', chosen_method;
-	--DEBUG: is the model trained again with the new training data?
-	EXECUTE format('SELECT %s(%s, time_column_name:=%L, target_column_name:=%L, training_data:=%L, number_of_predictions:=%s)',
-			chosen_method,
-			tmp_string, 
-			input_time_col_names[0],
-			target_column_name,
-			training_data_query,
-			i) into predictions;
+--		get results if chosen method is ML:
+	execute format('SELECT %s(%s features := %L, time_feature := %L, 
+						target_column_name := %L, 
+						training_data := %L, test_data := %L,
+						number_of_predictions := %s)',
+				chosen_method,
+				tmp_string, 
+				final_ml_features,
+				input_time_col_names[0],
+				target_column_name,
+				training_data_query,
+				test_data_query,
+				i) into predictions;
 
-	--DEBUG: check returned predictions: THE PREDICTION IS OFF HERE
-	raise notice '------PREDICTIONS: %', predictions;
 
-	--TODO: add comments here, what is happening?
- 	tmp_string_array := '{}';
+ 
+
+	tmp_string_array := '{}';
 -- 	Write the predictions in the final table
 	for tmp_record in EXECUTE format('SELECT %s as t FROM %s ORDER BY %s ASC', 
 		input_time_col_names[0],
-		training_test->'test',
+		ml_training_test->'test',
 		input_time_col_names[0]
 		) 
 	LOOP
 		tmp_string_array := tmp_string_array || tmp_record.t::text;
 	END LOOP;
+
+
 	for i in 1..array_length(tmp_string_array, 1) LOOP
 			EXECUTE format('UPDATE %s SET %s = %s WHERE %s=%L',
 				input_table_tmp_name,

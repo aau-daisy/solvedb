@@ -21,131 +21,7 @@ pr_method AS (INSERT INTO sl_pr_method(name, version, funct_name, description, t
 sl_pr_sol_method AS (INSERT INTO sl_pr_solver_method(sid, mid)
 		SELECT sid, mid from solver, pr_method
 		returning sid),
--- function managed by "predictive_solver_advisor" that 
---handles the execution of time series predictive models
---returns the names of the tables where the results have been written
-drop function if exists sl_time_series_models_handler(sl_solver_arg, 
-		 name,  text,
-		 text,  text,  text,  text, 
-		 name,  text,  text[]);
-CREATE OR replace function sl_time_series_models_handler(arg sl_solver_arg, 
-		target_column_name name, target_column_type text,
-		time_feature text, 
-		 results_table text, ts_methods_to_test text[])
-RETURNS text AS $$
 
-DECLARE
-
-	tmp_string_array 	text[] := '{}';
-	
-	
-	ts_training_sets	text[] := '{}'; 
-	ts_test_sets		text[] := '{}'; 
-	tmp_string		text;
-	tmp_name		name;
-	tmp_integer		integer;
-	method_parameters	sl_method_parameter_type[] := '{}';
-	tmp_numeric_array	numeric[] := '{}';
-	tmp_record		record;
-	tmp_numeric		numeric;
-	i			int;
-	training_test		text;
-	predictions		numeric[];
-
-BEGIN
-
----check time arguments (if time columns are present in the table)
-	if time_feature is null THEN
-		RAISE EXCEPTION 'No time columns present in the given Table. 
-					Impossible to process time series.';
-	END IF;	
-
--- Create 70%-30% (default value) split for each of the test/training set that need to be evaluated
-	for i in 1.. array_length(ts_training_tables, 1) LOOP
-		execute 'SELECT COUNT(*) FROM ' || ts_training_tables[i] into tmp_integer;
-		tmp_string  := sl_get_unique_tblname() || '_pr_ts_training';
-		EXECUTE format('CREATE TEMP TABLE %s AS SELECT %s,%s FROM %s LIMIT %s',
-			tmp_string,
-			time_feature,
-			target_column_name,
-			ts_training_tables[i],
-			((tmp_integer::numeric/100.0) * 70.0)::int);
-		ts_training_sets := ts_training_sets || tmp_string;
-		tmp_string  := sl_get_unique_tblname() || '_pr_ts_test';
-		EXECUTE format('CREATE TEMP TABLE %s AS SELECT %s,%s FROM %s OFFSET %s',
-			tmp_string,
-			time_feature,
-			target_column_name,
-			ts_training_tables[i],
-			((tmp_integer::numeric/100.0) * 70.0)::int);
-		ts_test_sets := ts_test_sets || tmp_string;
-	END LOOP;
-
-	for tmp_integer in 1..array_length(ts_training_sets, 1) LOOP
-		-- create test values
-		tmp_string := 'SELECT * FROM ' || ts_test_sets[tmp_integer];
-		tmp_numeric_array := sl_extract_column_to_array(tmp_string, target_column_name);
-
-
-		for i in 1..array_length(ts_methods_to_test,1) LOOP
-			--raise notice 'Training: %', ts_methods_to_test[i];
-			-- get user defined parameter to test
-			for tmp_record in execute format('select a.name::text, type, value_default, value_min, value_max
-						from sl_pr_parameter as a
-						inner join
-						sl_pr_method_param as b
-						on a.pid = b.pid
-						where b.mid in 
-						(
-						select mid
-						from sl_pr_method
-						where funct_name = %L)',
-				ts_methods_to_test[i])
-			LOOP
-				method_parameters := method_parameters || (tmp_record.name, tmp_record.type, tmp_record.value_default,
-										tmp_record.value_min, tmp_record.value_max)::sl_method_parameter_type;
-			END LOOP;
-
---FIT method as SOLVESELECT rewriting into optimization problem using solversw)
--- tmp_string contains the pairs param:=value of the trained model, to be formatted
-			tmp_string := sl_convert_ts_fit_to_solveselect(time_feature, target_column_name, 
-							ts_training_sets[tmp_integer], tmp_numeric_array,
-							ts_methods_to_test[i], method_parameters);
-
-
-			-- format the param:= value pairs
-			tmp_string_array := string_to_array(tmp_string, ',');
- 			tmp_string := format('%s',
-				(SELECT string_agg(format('%s := %s',
-					(method_parameters[j]).name,
-					tmp_string_array[j]), ',')
-				FROM generate_subscripts(method_parameters, 1) AS j));
-
-			-- run again to get the RMSE of the trained model
-			EXECUTE format('SELECT %s(%s, time_column_name:=%L, target_column_name:=%L, training_data:=%L, 
-								number_of_predictions:=%s)',
-			ts_methods_to_test[i],
-			tmp_string, 
-			time_feature,
-			target_column_name,
-			('select * from ' || ts_training_sets[tmp_integer]),
-			array_length(tmp_numeric_array,1)) into predictions;
-			tmp_numeric := sl_evaluation_rmse(tmp_numeric_array, predictions);
-			
-			
-			EXECUTE format('INSERT INTO %s(method, parameters, result) VALUES (%L, %L, %s)',
-			results_table,
-			ts_methods_to_test[i],
-			tmp_string,
-			tmp_numeric);	
-		END LOOP;
-	END LOOP;
-
-	-- return the tables where the results of the models have been written
-	return format('{"training" : "%s", "test" : "%s"}',
-		ts_training_tables[1], ts_target_tables[1]);
-END;
-$$ language plpgsql; 
 
 --Register the parameters
 
@@ -172,11 +48,17 @@ $$ language plpgsql;
                   RETURNING pid),
      sspar7 AS   (INSERT INTO sl_solver_param(sid, pid)
                   SELECT sid, pid FROM solver, spar7
-                  RETURNING sid)    
-
+                  RETURNING sid),
+     spar8 AS    (INSERT INTO sl_parameter(name, type, description, value_default, value_min, value_max)
+                  values ('predictions' , 'int', 'number of points to predict', null, null, null) 
+                  RETURNING pid),
+     sspar8 AS   (INSERT INTO sl_solver_param(sid, pid)
+                  SELECT sid, pid FROM solver, spar8
+                  RETURNING sid)   
+   
 
 --Perform the actual insert
-SELECT count(*) FROM solver, method1, pr_method, sl_pr_sol_method, spar2, sspar2, spar3, sspar3, spar5, sspar5, spar7, sspar7;
+SELECT count(*) FROM solver, method1, pr_method, sl_pr_sol_method, spar2, sspar2, spar3, sspar3, spar5, sspar5, spar7, sspar7, spar8, sspar8;
 
 --Set the default method
 UPDATE sl_solver s
@@ -184,8 +66,7 @@ SET default_method_id = mid
 FROM sl_solver_method m
 WHERE (s.sid = m.sid) AND (s.name = 'lr_solver') AND (m.name='lr');
 
-
---arima solver default method
+--linear regression solver default method
 drop function if exists lr_solver(arg sl_solver_arg);
 CREATE OR replace function lr_solver(arg sl_solver_arg ) RETURNS SETOF record as $$
 
@@ -217,3 +98,70 @@ END;
 $$ LANGUAGE plpgsql strict;
 
 
+--Method for linear_regression_solver
+DROP FUNCTION IF EXISTS lr_predict(text[], text, text, text, text, int);
+CREATE OR REPLACE FUNCTION lr_predict(
+features text[], time_feature text,
+ target_column_name text, training_data text, test_data text, number_of_predictions int)
+RETURNS NUMERIC[]
+AS $$
+	import numpy as np
+	import math
+	from sklearn import linear_model
+	import dateutil.parser as parser
+	train_x	= []
+	train_y	= []
+	test_x  = []
+	rv = plpy.execute(training_data)
+
+	for x in rv:
+		f_list = []
+		for feature in features:
+			f_list.append(x[feature])
+		# split time feature:
+		curr_time = parser.parse(str(x[time_feature]))
+		#year, month, day, hour, minute, second
+		f_list.append(curr_time.year)
+		f_list.append(curr_time.month)
+		f_list.append(curr_time.day)
+		f_list.append(curr_time.hour)
+		f_list.append(curr_time.minute)
+		f_list.append(curr_time.second)
+		train_x.append(f_list)
+		train_y.append(x[target_column_name])
+
+	rv = plpy.execute(test_data)
+	for x in rv:
+		f_list = []
+		for feature in features:
+			f_list.append(x[feature])
+		#year, month, day, hour, minute, second
+		curr_time = parser.parse(str(x[time_feature]))
+		f_list.append(curr_time.year)
+		f_list.append(curr_time.month)
+		f_list.append(curr_time.day)
+		f_list.append(curr_time.hour)
+		f_list.append(curr_time.minute)
+		f_list.append(curr_time.second)
+		test_x.append(f_list)       
+
+	regr = linear_model.LinearRegression().fit(train_x, train_y)
+	predictions = regr.predict(test_x)
+	#if needed print information about the model to the client
+	if GD["print_model_summary"]:
+		plpy.notice("Coefficients: ", regr.coef_)
+		plpy.notice("Score: ", regr.score(train_x, train_y))
+	#except Exception as ex:
+	#	#plpy.warning(format(ex))
+	#	predictions = np.array(y_train[len(y_train) - number_of_predictions:len(y_train)])
+	#except ValueError as err:
+	#	#plpy.warning(format(err))
+	#	predictions = np.array(y_train[len(y_train) - number_of_predictions:len(y_train)])
+	#--check for predictions that are nan
+	for pr in range(len(predictions)):
+		if math.isnan(predictions[pr]):
+			plpy.notice("linear regression prediction is Nan for n:", pr);
+			predictions[pr] = np.mean(np.array(y_train[len(y_train) - number_of_predictions:len(y_train)]))
+
+	return predictions.tolist();
+$$ LANGUAGE plpythonu;
