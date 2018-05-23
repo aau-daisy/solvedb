@@ -68,18 +68,101 @@ CREATE TYPE sl_supported_time_types AS ENUM ('timestamp',
                     'time with time zone',
                     'time without time zone');
 
-
-
-
-
 -- *********UTILITY FUNCTIONS FOR FORECASTING SOLVERS *********
+
+
+-- This function finds the seasonality
+drop function sl_pr_find_seasonality(text, name, name);
+create or replace function sl_pr_find_seasonality(time_series text, time_column_name name, 
+			target_column_name name)
+returns int as $$
+	from statsmodels.tsa.seasonal import seasonal_decompose
+	import pandas as pd
+	import numpy as np
+	import dateutil.parser as parser
+
+	time_column   = []
+	target_column = []
+
+	query = 'select * from ' +  time_series
+	plpy.notice(query)
+	rv = plpy.execute(query)
+	for x in rv:
+		target_column.append(x[target_column_name])
+		time_column.append(parser.parse(x[time_column_name]));
+
+	time_column = np.array(time_column)
+	target_column = np.array(target_column)
+	series = pd.Series(target_column, time_column)
+	series.index = pd.to_datetime(series.index)
+
+	result = seasonal_decompose(series)
+	s = result.seasonal.values
+	t = ''.join(str(e) for e in result.seasonal.values)
+	#check for pattern
+	i = (t+t).find(t, 1, -1)
+	if i != -1:
+	    season_length = len(t)/i
+	else:
+	    season_length = 0
+	plpy.notice('-----------------seasonality:', season_length)
+	return season_length
+$$
+language plpythonu;
+
+
+-- returns an array of queries (views over data) with:
+-- test set, training_set 1, training_set 2, ..., training_set_k
+-- split according to seasonality
+create or replace function sl_pr_time_series_splitter(time_series text, 
+			time_column_name name, target_column_name name) 
+returns text[] as $$
+declare
+	series_length int;
+	seasonality   int;
+	k 	      float := 10.0;
+	views		text[] := '{}';
+	splits		int;
+	i		int;
+	test_offset	int;
+	train_offset	int;
+begin
+	-- get time series (length T)
+	execute format('select count(*) from %s', time_series) into series_length;
+	raise notice 'series length: %', series_length;
+	
+	-- find seasonality S or split in K
+	select sl_pr_find_seasonality(time_series, time_column_name, target_column_name) into seasonality;
+	splits := (series_length/seasonality)::int;
+	if splits = 1 then
+		seasonality := series_length::float/k::float;
+		splits := k;
+	end if;
+
+	-- split in training and test -- test is 30% of T/S
+	test_offset := series_length - (seasonality * ((splits/100.0) * 30)::int);
+	views := views || format('select * from %s offset %s', time_series, test_offset);
+
+	-- split the training set into increasing views (on seasonality)
+	for i in 1.. (splits - (splits/100.0) * 30)::int LOOP
+		-- find the T/S offsets where to split
+		train_offset := test_offset - (seasonality * i);
+		views := views || format('select * from %s offset %s limit %s', time_series, train_offset,
+										seasonality*i);
+	END LOOP;
+
+	raise notice 'SPLITTING VIEWS QUERY: -- %', views;
+	return views;
+end
+$$
+language plpgsql;
+
 
 
 -- This function dynamically generates a solve query for predictive solvers (used when calling a specific predictive solver
 -- to generate a call to the predictive advisor with the correct predictive method
-
--- Dynamically generates a solve select query
-CREATE OR REPLACE FUNCTION sl_pr_generate_predictive_solve_query(query sl_solve_query, par_val_pairs text[][] DEFAULT NULL::text[][])
+CREATE OR REPLACE FUNCTION sl_pr_generate_predictive_solve_query(query sl_solve_query, 
+par_val_pairs text[][] DEFAULT NULL::text[][])
  RETURNS text AS $$
   SELECT format('SOLVESELECT %s IN (%s) USING %s(%s)', 
 	    ((query.problem).cols_unknown)[1], 						 -- target column
@@ -91,7 +174,7 @@ CREATE OR REPLACE FUNCTION sl_pr_generate_predictive_solve_query(query sl_solve_
 			THEN par_val_pairs[i][1]
 			ELSE format('%s:=%L', par_val_pairs[i][1], par_val_pairs[i][2]) END, ',') 
 	     FROM generate_subscripts(par_val_pairs, 1) AS i)	     -- Solver parameter clause
-	)		
+)		
 $$ LANGUAGE sql IMMUTABLE;
 
 
@@ -129,15 +212,11 @@ $$ LANGUAGE SQL IMMUTABLE STRICT;
 
 
 
-
-
-
-
-
 -- This function rewrites the optimization problem of a TIME SERIES 
 --forecasting model into a SOLVESELECT,
 -- using the swarm solver to find the solution
-DROP FUNCTION IF EXISTS sl_convert_ts_fit_to_solveselect(text, name, text, numeric[], text, sl_method_parameter_type[]);
+DROP FUNCTION IF EXISTS sl_convert_ts_fit_to_solveselect(text, name, text, numeric[], text, 
+			sl_method_parameter_type[]);
 CREATE FUNCTION sl_convert_ts_fit_to_solveselect(time_feature text, target name, training_data text, 
 						test_values numeric[], method text, 
 						parameters sl_method_parameter_type[])
@@ -149,9 +228,11 @@ declare
 	S 		int := 10;
 begin
 	execute format('SELECT * FROM (SOLVESELECT %s IN (SELECT %s) as sl_fts 
-			MINIMIZE (SELECT sl_evaluation_rmse(%L, %s(%s, time_column_name := %L, target_column_name := %L, 
+			MINIMIZE (SELECT sl_evaluation_rmse(%L, %s(%s, time_column_name := %L, 
+			target_column_name := %L, 
 			training_data := %L, number_of_predictions := %s))::int) 
-			SUBJECTTO (SELECT %s FROM sl_fts) USING swarmops.pso(n:=%s, S := %s)) AS sl_tmp_tmp',
+			SUBJECTTO (SELECT %s FROM sl_fts) USING swarmops.pso(n:=%s, S := %s))
+			AS sl_tmp_tmp',
 		(SELECT string_agg(format('%s',(parameters[j]).name), ',')
 			FROM generate_subscripts(parameters, 1) AS j),
 		(SELECT string_agg(format('NULL::%s AS %s',
@@ -178,6 +259,7 @@ begin
 	tmp_string := replace(tmp_record::text, '(','');
 	tmp_string := replace(tmp_string, ')', '');
 	return tmp_string;
+	raise notice '%', tmp_string;
 end;
 $$ language plpgsql;
 
@@ -477,14 +559,8 @@ $$ LANGUAGE plpythonu;
 -- handles the execution of time series predictive models
 -- returns the names of the tables where the results have been written
 drop function if exists sl_time_series_models_handler(sl_solver_arg, 
-		 name,  text,
-		text, text, int, text,
+		 name,  text, text, text, int, text,
 		 name,  text,  text[], int);
--- CREATE OR REPLACE FUNCTION sl_time_series_models_handler(arg sl_solver_arg, 
--- 		target_column_name name, target_column_type text,
--- 		attStartTime text, attEndTime text, attFrequency text, time_feature text, 
--- 		input_table_tmp_name name, results_table text, ts_methods_to_test text[],
--- 		attPredictions int)
 CREATE OR REPLACE FUNCTION sl_time_series_models_handler(arg sl_solver_arg, 
 		target_column_name name, target_column_type text,
 		attStartTime text, attEndTime text, timeFrequency int, time_feature text, 

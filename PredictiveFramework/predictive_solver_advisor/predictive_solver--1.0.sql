@@ -101,17 +101,18 @@ DECLARE
 	tmp_string		text;
 -- 	method 			VARCHAR[];
 	training_data_query 	text;
-	test_data_query		text;
+	test_data_query		name;
 	tmp_record		record;
 	results_table		text := sl_build_pr_results_table();
 	chosen_method		text;
-
 	-- for testing only
 	predictions		numeric[];
 	ts_training_test		jsonb;		--temporary containers for result tables (use GD)
 	ml_training_test	jsonb;	
 	chosen_method_type	text;
 	timeFrequency		int := null;
+	seasonality		int := null;
+	views_for_training_test	text[] := '{}';
      
 BEGIN       
 	--------//////     	SETUP		////-------------------------------
@@ -265,13 +266,45 @@ BEGIN
 	IF attPredictions IS NOT NULL AND attPredictions <= 0 THEN
 		RAISE EXCEPTION 'Error: parameter number of predictions must be >= 1';
 	END IF;
+
+	-- get TEST (TARGET) SET (query)
+	test_data_query := separate_input_relation_on_time_range(target_column_name, arg.tmp_id, 
+			final_ts_features[0], timeFrequency, input_table_tmp_name, 
+			attStartTime, attEndTime, attPredictions);
+	IF test_data_query is null THEN 
+		RAISE EXCEPTION 'Error in prediction interval and input time series';
+	END IF;
+	-- get training set (query) as time series < test set
+	training_data_query := format('select * from %s 
+				where %s < 
+				(select %s from 
+				(%s)as t limit 1)',
+				input_table_tmp_name,
+				final_ts_features[0],
+				final_ts_features[0],
+				test_data_query);
+	IF training_data_query is null THEN
+		RAISE EXCEPTION 'Error with time series: no data for model training (possibly wrong prediction interval).';
+	END IF;
+
+	-- SPLIT TRAINING SET IN TRAINING AND VALIDATION SET
+
+	select sl_pr_time_series_splitter(training_data_query, final_ts_features[0], target_column_name)
+		into views_for_training_test;
+	
 ---------------------------------------- ////// END SETUP	------------------------------------
 
 
+	
+
+
+	--load test set data here
+	
 	if test_ts_methods THEN
 		select sl_time_series_models_handler(arg, target_column_name, target_column_type, 
 			attStartTime, attEndTime, timeFrequency, final_ts_features[0], 
-			input_table_tmp_name, results_table, ts_methods_to_test, attPredictions) 
+			input_table_tmp_name, results_table, ts_methods_to_test, attPredictions,
+			views_for_training_test) 
 			into ts_training_test;	
 	END IF;
 	
@@ -279,7 +312,8 @@ BEGIN
 		SELECT sl_ml_models_handler(arg, target_column_name, target_column_type, 
 			attStartTime, attEndTime, timeFrequency, final_ts_features[0],
 			final_ml_features,---todo: cheak features here!
-			input_table_tmp_name, results_table, ml_methods_to_test, attPredictions, k) 
+			input_table_tmp_name, results_table, ml_methods_to_test, attPredictions, k,
+			views_for_training_test) 
 			INTO ml_training_test;
 	END IF;
 
