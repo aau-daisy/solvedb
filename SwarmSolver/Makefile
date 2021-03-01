@@ -4,8 +4,7 @@ include $(subdir)/swarmops.mk
 
 PG_CPPFLAGS := -I$(subdir) -I$(swdir)/ -I../SolverAPI/
 
-SHLIB_LINK = ../SolverAPI/libsolverapi.a -L. -lSwarmOps
-SHLIB_PREREQS = libSwarmOps.so
+SHLIB_LINK = ../SolverAPI/libsolverapi.a -L$(subdir)/swarmops/ -lSwarmOps
 
 MODULE_big = solversw
 OBJS = solversw.o

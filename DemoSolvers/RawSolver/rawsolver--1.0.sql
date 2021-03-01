@@ -107,7 +107,7 @@ CREATE OR REPLACE FUNCTION rawsolver_solve_default(arg sl_solver_arg) RETURNS se
 
      -- Formulate the problem
      CREATE TEMP VIEW raw_solver_solution AS 
-	SOLVESELECT raw_solver_value_i, raw_solver_value_f IN (SELECT * FROM raw_solver_input) AS t
+	SOLVESELECT t(raw_solver_value_i, raw_solver_value_f) AS (SELECT * FROM raw_solver_input)
 	MINIMIZE  (SELECT sum(obj_value * CASE WHEN is_int THEN raw_solver_value_i ELSE raw_solver_value_f END) FROM t)
 	SUBJECTTO -- MIN value case
 		  (SELECT CASE WHEN is_int THEN raw_solver_value_i ELSE raw_solver_value_f END >= min_value

@@ -848,8 +848,8 @@ VALUES
 SELECT c.cid, c.name, exp_daily*365.25 as exp_yearly FROM (
 
  -- Find daily expenditures for each commodit
- SOLVESELECT exp_daily IN (SELECT cid, name, NULL::float4 AS exp_daily 
-			   FROM commodities) AS t
+ SOLVESELECT t(exp_daily) AS (SELECT cid, name, NULL::float4 AS exp_daily 
+			   FROM commodities)
  -- Minimize the daily expenditures
  MINIMIZE (SELECT sum(exp_daily) FROM t)
  SUBJECTTO 

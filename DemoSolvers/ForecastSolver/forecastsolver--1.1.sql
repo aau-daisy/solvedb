@@ -108,12 +108,12 @@ CREATE OR REPLACE FUNCTION forecasting_solve_default(arg sl_solver_arg) RETURNS 
      -- We're now estimating model parameters with the LP solver
      CREATE TEMP TABLE forecast_params AS 	
 	-- Find model parameters
-	SOLVESELECT        peps, pyear, pjan, pfeb, pmar, papr, pmay, pjun, pjul, paug, psep, poct, pnov, pmon, ptue, pwed, pthu, pfri, psat, ptemp, ptemp2, ptempymax, pload8am IN 
+	SOLVESELECT  p(peps, pyear, pjan, pfeb, pmar, papr, pmay, pjun, pjul, paug, psep, poct, pnov, pmon, ptue, pwed, pthu, pfri, psat, ptemp, ptemp2, ptempymax, pload8am) AS
 		(SELECT  phour, 0.0 AS peps, 0.0 AS pyear, 0.0 AS pjan,  0.0 AS pfeb, 0.0 AS pmar, 0.0 AS papr, 
 					 0.0 AS pmay,  0.0 AS pjun, 0.0 AS pjul,  0.0 AS paug,  0.0 AS psep, 0.0 AS poct, 0.0 AS pnov, 
 					 0.0 AS pmon,  0.0 AS ptue, 0.0 AS pwed,  0.0 AS pthu,  0.0 AS pfri, 0.0 AS psat, 0.0 AS ptemp,
-					 0.0 AS ptemp2,0.0 AS ptempymax,	   0.0 AS pload8am FROM generate_series(0,23) phour) AS p
-	  WITH xp, xn IN (SELECT *, 0.0 AS xp, 0.0 AS xn FROM raw_data_predictors WHERE load IS NOT NULL) AS u
+					 0.0 AS ptemp2,0.0 AS ptempymax,	   0.0 AS pload8am FROM generate_series(0,23) phour)
+	  WITH u(xp, xn) AS (SELECT *, 0.0 AS xp, 0.0 AS xn FROM raw_data_predictors WHERE load IS NOT NULL)
 	MINIMIZE  (SELECT sum(xp + xn) FROM u) /* The LP trick to be able to minimize sum of absolute values */ 
 	SUBJECTTO (SELECT xp>=0, xn>=0 FROM u),
 		  (SELECT u.xp - u.xn =  /* Data value - Model value */ u.load - (

@@ -92,8 +92,8 @@ INSERT INTO sudoku (ID, COL, LIN, VAL) VALUES (1, 9, 9, 9);
 
 
 SELECT id, col, lin, val FROM (
-   SOLVESELECT sel IN (SELECT id, col, lin, v as val, (val=v) as giv, NULL::boolean AS sel FROM sudoku,
-                       generate_series(1,9) as v) as sudoku
+   SOLVESELECT sudoku(sel) AS (SELECT id, col, lin, v as val, (val=v) as giv, NULL::boolean AS sel FROM sudoku,
+                       generate_series(1,9) as v)
    SUBJECTTO
           (SELECT sel = giv FROM sudoku WHERE giv),
           (SELECT sum(sel)=1 FROM sudoku GROUP BY lin, col),

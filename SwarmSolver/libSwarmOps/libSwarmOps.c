@@ -97,12 +97,12 @@ extern SO_TElm const* getMethodParameters(size_t methodId, SwarmOpsParameter * m
 	// Apply user defined parameters from methodParams
 	for (i=0; i < numMethodParams; i++)
 	{
-		found = FALSE;
+		found = false;
 		for (j=0; j < SO_kMethodNumParameters[methodId]; j++)
 			if (strcasecmp(methodParams[i].param, SO_kMethodParameterName[methodId][j]) == 0)
 			{
 				parValues[j] = methodParams[i].value;
-				found = TRUE;
+				found = true;
 			};
 		if (!found)
 			ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),

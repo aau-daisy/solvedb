@@ -1,7 +1,0 @@
-# The LP solver extension
-comment = 'GLKP linear programming solver V1.5 for PostreSQL 9.2 (by Laurynas)'
-default_version = '1.5'
-module_pathname = '$libdir/solverlp'
-requires = 'solverapi'
-relocatable = false
-schema = public

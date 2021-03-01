@@ -4,7 +4,7 @@ ifndef subdir
 subdir = .
 endif
 
-swdir = $(subdir)/SwarmOps
+swdir = $(subdir)/swarmops
 
 swOBJs = \
 $(swdir)/Tools/Random.o \
