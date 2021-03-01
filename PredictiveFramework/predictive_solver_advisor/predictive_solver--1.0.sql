@@ -278,7 +278,7 @@ BEGIN
 	training_data_query := format('select * from %s 
 				where %s < 
 				(select %s from 
-				(%s)as t limit 1)',
+				%s limit 1)',
 				input_table_tmp_name,
 				final_ts_features[0],
 				final_ts_features[0],

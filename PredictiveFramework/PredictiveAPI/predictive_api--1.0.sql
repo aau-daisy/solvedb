@@ -72,7 +72,7 @@ CREATE TYPE sl_supported_time_types AS ENUM ('timestamp',
 
 
 -- This function finds the seasonality
-drop function sl_pr_find_seasonality(text, name, name);
+drop function if exists sl_pr_find_seasonality(text, name, name);
 create or replace function sl_pr_find_seasonality(time_series text, time_column_name name, 
 			target_column_name name)
 returns int as $$
@@ -84,7 +84,7 @@ returns int as $$
 	time_column   = []
 	target_column = []
 
-	query = 'select * from ' +  time_series
+	query = 'select * from (' +  time_series + ')'
 	plpy.notice(query)
 	rv = plpy.execute(query)
 	for x in rv:
@@ -128,7 +128,7 @@ declare
 	train_offset	int;
 begin
 	-- get time series (length T)
-	execute format('select count(*) from %s', time_series) into series_length;
+	execute format('select count(*) from (%s) AS s', time_series) into series_length;
 	raise notice 'series length: %', series_length;
 	
 	-- find seasonality S or split in K
@@ -217,7 +217,7 @@ $$ LANGUAGE SQL IMMUTABLE STRICT;
 -- using the swarm solver to find the solution
 DROP FUNCTION IF EXISTS sl_convert_ts_fit_to_solveselect(text, name, text, numeric[], text, 
 			sl_method_parameter_type[]);
-CREATE FUNCTION sl_convert_ts_fit_to_solveselect(time_feature text, target name, training_data text, 
+CREATE OR REPLACE FUNCTION sl_convert_ts_fit_to_solveselect(time_feature text, target name, training_data text, 
 						test_values numeric[], method text, 
 						parameters sl_method_parameter_type[])
 RETURNS text AS $$
@@ -227,7 +227,7 @@ declare
 	n_iterations	int:=10;
 	S 		int := 10;
 begin
-	execute format('SELECT * FROM (SOLVESELECT %s IN (SELECT %s) as sl_fts 
+	execute format('SELECT * FROM (SOLVESELECT sl_fts(%s) AS (SELECT %s) 
 			MINIMIZE (SELECT sl_evaluation_rmse(%L, %s(%s, time_column_name := %L, 
 			target_column_name := %L, 
 			training_data := %L, number_of_predictions := %s))::int) 

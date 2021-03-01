@@ -1,4 +1,3 @@
-﻿
 -- cleaning tables for the new solver installation
 truncate sl_pr_solver_method cascade;
 truncate sl_pr_parameter cascade;

@@ -1,4 +1,4 @@
-﻿drop function feature_selection(text[], text, text);
+drop function feature_selection(text[], text, text);
 CREATE OR REPLACE FUNCTION feature_selection(features text[], target text, table_name text) returns name[] as $$
 
 	print "this is the python method"

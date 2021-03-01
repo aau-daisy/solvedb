@@ -1,0 +1,10 @@
+prefix=/home/laurynas/Projects/SolveDB_pg11.2_ext/LPsolver_v1.6/pgCbc/Cbc-2.9.4
+libdir=/home/laurynas/Projects/SolveDB_pg11.2_ext/LPsolver_v1.6/pgCbc/Cbc-2.9.4/Cbc/src
+
+Name: CBC
+Description: COIN-OR Branch and Cut
+URL: https://projects.coin-or.org/Cbc
+Version: 2.9.4
+Libs: ${libdir}/libCbcSolver.la ${libdir}/libCbc.la 
+Cflags: -I/home/laurynas/Projects/SolveDB_pg11.2_ext/LPsolver_v1.6/pgCbc/Cbc-2.9.4/Cbc/src -I/home/laurynas/Projects/SolveDB_pg11.2_ext/LPsolver_v1.6/pgCbc/Cbc-2.9.4/Cbc/src
+Requires: osi-clp cgl osi coinutils 

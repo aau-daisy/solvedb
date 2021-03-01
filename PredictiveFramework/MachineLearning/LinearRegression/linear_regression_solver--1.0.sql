@@ -1,4 +1,4 @@
-﻿-- TODO: solver not complete, it does not work yet
+-- TODO: solver not complete, it does not work yet
 -- Installation script for linear regression solver
 delete from sl_solver where name = 'lr_solver';
 

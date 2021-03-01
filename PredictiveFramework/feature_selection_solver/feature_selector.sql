@@ -1,4 +1,4 @@
-﻿
+
 -- This function selects the most relevant features for prediction from the dataset, that account to [80%] of the importance (Default percentage)
 -- It also removes irrelevant features
 -- For time series forecasting: if a time_column is not given, select a random time column (TODO: update this function to analyse the dataset for the best time column)

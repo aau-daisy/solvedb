@@ -1,0 +1,29 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 9.00
+# Visual Studio 2005
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "RandomOpsTest2", "RandomOpsTest2\RandomOpsTest2.vcproj", "{3BEE9443-C6BE-406B-86FC-E088E4290A96}"
+	ProjectSection(ProjectDependencies) = postProject
+		{CA022488-AE6B-46EA-89E0-954BDA1E9651} = {CA022488-AE6B-46EA-89E0-954BDA1E9651}
+	EndProjectSection
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "RandomOpsLib", "..\RandomOpsLib\RandomOpsLib\RandomOpsLib.vcproj", "{CA022488-AE6B-46EA-89E0-954BDA1E9651}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Win32 = Debug|Win32
+		Release|Win32 = Release|Win32
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{3BEE9443-C6BE-406B-86FC-E088E4290A96}.Debug|Win32.ActiveCfg = Debug|Win32
+		{3BEE9443-C6BE-406B-86FC-E088E4290A96}.Debug|Win32.Build.0 = Debug|Win32
+		{3BEE9443-C6BE-406B-86FC-E088E4290A96}.Release|Win32.ActiveCfg = Release|Win32
+		{3BEE9443-C6BE-406B-86FC-E088E4290A96}.Release|Win32.Build.0 = Release|Win32
+		{CA022488-AE6B-46EA-89E0-954BDA1E9651}.Debug|Win32.ActiveCfg = Debug|Win32
+		{CA022488-AE6B-46EA-89E0-954BDA1E9651}.Debug|Win32.Build.0 = Debug|Win32
+		{CA022488-AE6B-46EA-89E0-954BDA1E9651}.Release|Win32.ActiveCfg = Release|Win32
+		{CA022488-AE6B-46EA-89E0-954BDA1E9651}.Release|Win32.Build.0 = Release|Win32
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+EndGlobal

@@ -1,0 +1,10 @@
+prefix=/home/laurynas/Projects/SolveDB_pg11.2_ext/LPsolver_v1.6/pgCbc/Cbc-2.9.4
+libdir=/home/laurynas/Projects/SolveDB_pg11.2_ext/LPsolver_v1.6/pgCbc/Cbc-2.9.4/Osi/src/OsiCommonTest
+
+Name: OsiUnitTests
+Description: COIN-OR Open Solver Interface Common Unit Tests
+URL: https://projects.coin-or.org/Osi
+Version: 0.107.4
+Libs: ${libdir}/libOsiCommonTests.la
+Cflags: -I/home/laurynas/Projects/SolveDB_pg11.2_ext/LPsolver_v1.6/pgCbc/Cbc-2.9.4/Osi/src/OsiCommonTest
+Requires: osi

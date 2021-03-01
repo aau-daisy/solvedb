@@ -1,0 +1,8 @@
+datadir=/home/laurynas/Projects/SolveDB_pg11.2_ext/LPsolver_v1.6/pgCbc/Cbc-2.9.4/Data/Sample
+
+Name: Sample
+Description: Sample models
+URL: https://projects.coin-or.org/svn/Data/Sample
+Version: 1.2.10
+Libs:
+Cflags:

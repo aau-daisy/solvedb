@@ -1,0 +1,10 @@
+prefix=/home/laurynas/Projects/SolveDB_pg11.2_ext/LPsolver_v1.6/pgCbc/Cbc-2.9.4
+libdir=/home/laurynas/Projects/SolveDB_pg11.2_ext/LPsolver_v1.6/pgCbc/Cbc-2.9.4/CoinUtils/src
+
+Name: CoinUtils
+Description: COIN-OR Utilities
+URL: https://projects.coin-or.org/CoinUtils
+Version: 2.10.6
+Libs: ${libdir}/libCoinUtils.la -lz -lm 
+Cflags: -I/home/laurynas/Projects/SolveDB_pg11.2_ext/LPsolver_v1.6/pgCbc/Cbc-2.9.4/CoinUtils/src -I/home/laurynas/Projects/SolveDB_pg11.2_ext/LPsolver_v1.6/pgCbc/Cbc-2.9.4/CoinUtils/src
+Requires: 

@@ -296,10 +296,9 @@ static Datum sl_exec_sql(const char *sql, int arg_count, Oid *arg_types, Datum *
 	HeapTuple       spi_tuple;
 	bool 			is_null;
 	Datum 			result;
-	bool			pushed;
 
     /* Now build query */
-	pushed = SPI_push_conditional();
+	SPI_push_conditional();
     if ((ret = SPI_connect()) < 0)
             elog(ERROR, "SolverAPI: SPI_connect returned %d", ret);
 

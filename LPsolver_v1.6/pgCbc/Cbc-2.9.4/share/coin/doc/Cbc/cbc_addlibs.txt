@@ -1,0 +1,1 @@
+-L/home/laurynas/Projects/SolveDB_pg11.2_ext/LPsolver_v1.6/pgCbc/Cbc-2.9.4/lib -lCbcSolver -lCbc -lCgl -lOsiClp -lClpSolver -lClp -lOsi -lCoinUtils -lz -lm  

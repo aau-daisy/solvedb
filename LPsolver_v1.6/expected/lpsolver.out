@@ -1,0 +1,416 @@
+-- LPsolver regression tests
+create extension solverapi;
+create extension solverLP;
+-- Test function creation for unknown variables
+select lp_function_make(1);
+ lp_function_make 
+------------------
+ 1x1+0
+(1 row)
+
+-- Test function creation for integers
+select (1)::lp_function;
+ lp_function 
+-------------
+ 1
+(1 row)
+
+-- Test function creation for numericals
+select (1.5)::lp_function;
+ lp_function 
+-------------
+ 1.5
+(1 row)
+
+-- Test function creation for booleans
+select (true)::lp_function;
+ lp_function 
+-------------
+ 1
+(1 row)
+
+-- Test implicit casts
+select lp_function_make(1) + 1;
+ ?column? 
+----------
+ 1x1+1
+(1 row)
+
+select lp_function_make(1) + 1.5;
+ ?column? 
+----------
+ 1x1+1.5
+(1 row)
+
+select lp_function_make(1) + true;
+ ?column? 
+----------
+ 1x1+1
+(1 row)
+
+-- Test constant-function multiplication
+select 2*(lp_function_make(1) + 10);
+ ?column? 
+----------
+ 2x1+20
+(1 row)
+
+select (lp_function_make(1) + 10)*2;
+ ?column? 
+----------
+ 2x1+20
+(1 row)
+
+-- Test constant-function division
+select (3*lp_function_make(1)+10)/2;
+ ?column? 
+----------
+ 1.5x1+5
+(1 row)
+
+-- Test function-function addition
+select (3*lp_function_make(1) + 5) + (lp_function_make(2) + 10); -- when x1<x2
+  ?column?  
+------------
+ 3x1+1x2+15
+(1 row)
+
+select (lp_function_make(2) + 10) + (3*lp_function_make(1) + 5); -- when x1>x2
+  ?column?  
+------------
+ 3x1+1x2+15
+(1 row)
+
+select (lp_function_make(1) + 10) + (3*lp_function_make(1) + 5); -- when x1=x2
+ ?column? 
+----------
+ 4x1+15
+(1 row)
+
+-- Test function aggregation
+select sum(pol) from (values (3::lp_function), (2::lp_function)) as v (pol);
+ sum 
+-----
+ 5
+(1 row)
+
+-- Test function-function substraction
+select (3*lp_function_make(1) + 5) - (lp_function_make(2) + 10); -- when x1<x2
+  ?column?   
+-------------
+ 3x1+-1x2+-5
+(1 row)
+
+select (lp_function_make(2) + 10) - (3*lp_function_make(1) + 5); -- when x1>x2
+  ?column?  
+------------
+ -3x1+1x2+5
+(1 row)
+
+select (lp_function_make(1) + 10) - (3*lp_function_make(1) + 5); -- when x1=x2
+ ?column? 
+----------
+ -2x1+5
+(1 row)
+
+-- Test function assignment/inequality type
+select 8 = 3::lp_function;
+ ?column? 
+----------
+ 8==3
+(1 row)
+
+select 3::lp_function = 8;
+ ?column? 
+----------
+ 8==3
+(1 row)
+
+-- Test constant-function inequalities
+select 8 > 3::lp_function;
+ ?column? 
+----------
+ 8>3
+(1 row)
+
+select 8 >= 3::lp_function;
+ ?column? 
+----------
+ 8>=3
+(1 row)
+
+select 8 < 3::lp_function;
+ ?column? 
+----------
+ 8<3
+(1 row)
+
+select 8 <= 3::lp_function;
+ ?column? 
+----------
+ 8<=3
+(1 row)
+
+-- Test function-constant inequalities
+select 3::lp_function > 8;
+ ?column? 
+----------
+ 8<3
+(1 row)
+
+select 3::lp_function >= 8;
+ ?column? 
+----------
+ 8<=3
+(1 row)
+
+select 3::lp_function < 8;
+ ?column? 
+----------
+ 8>3
+(1 row)
+
+select 3::lp_function <= 8;
+ ?column? 
+----------
+ 8>=3
+(1 row)
+
+-- Test function-function inequalities
+select 3::lp_function > 2::lp_function;
+ ?column? 
+----------
+ 0>-1
+(1 row)
+
+select 3::lp_function >= 2::lp_function;
+ ?column? 
+----------
+ 0>=-1
+(1 row)
+
+select 3::lp_function < 2::lp_function;
+ ?column? 
+----------
+ 0<-1
+(1 row)
+
+select 3::lp_function <= 2::lp_function;
+ ?column? 
+----------
+ 0<=-1
+(1 row)
+
+-- Test the solver for SUDOKU (from the example from http://en.wikipedia.org/wiki/Sudoku)
+create table sudoku_tmp
+as (select (row_number() over ()) as id, col, row, val, (null::boolean) as giv, (null::boolean) as fval 
+    from generate_series(1,9) as col, generate_series(1,9) as row, generate_series(1,9) as val);
+-- Setup the givens
+update sudoku_tmp
+set giv = true
+where (col, row, val) in (VALUES (1,9,5),(1,8,6),(1,6,8),(1,5,4),(1,4,7),
+                                 (2,9,3),(2,7,9),(2,3,6),
+                                 (3,7,8),
+                                 (4,8,1),(4,5,8),(4,2,4),
+                                 (5,9,7),(5,8,9),(5,6,6),(5,4,2),(5,2,1),(5,1,8),
+                                 (6,8,5),(6,5,3),(6,2,9),
+                                 (7,3,2),
+                                 (8,7,6),(8,3,8),(8,1,7),
+                                 (9,6,3),(9,5,1),(9,4,6),(9,2,5),(9,1,9));
+-- call the solver
+select lp_problem_solve(ARRAY[['tbl_name',  'sudoku_tmp'],
+			      ['col_unique','id'],
+			      ['col_unknown','fval'],
+			      -- assign pre-defined numbers using the "givens"
+			      ['ctr_sql','SELECT fval = giv FROM sudoku_tmp WHERE giv'], 
+			      -- each cell must be assigned exactly one number
+			      ['ctr_sql','SELECT sum(fval)=1 FROM sudoku_tmp GROUP BY col, row'],
+			      -- cells in the same row must be assigned distinct numbers			  
+			      ['ctr_sql','SELECT sum(fval)=1 FROM sudoku_tmp GROUP BY val, row'],
+			      -- cells in the same col must be assigned distinct numbers			  
+			      ['ctr_sql','SELECT sum(fval)=1 FROM sudoku_tmp GROUP BY val, col'],
+			      -- cells in the same region must be assigned distinct numbers
+			      ['ctr_sql','SELECT sum(fval)=1 FROM sudoku_tmp GROUP BY val, ((col-1) / 3), ((row-1) / 3)']
+			     ]);
+ERROR:  function lp_problem_solve(text[]) does not exist
+LINE 1: select lp_problem_solve(ARRAY[['tbl_name',  'sudoku_tmp'],
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+SELECT * FROM (
+   SOLVE fval IN (SELECT * FROM sudoku_tmp) as sudoku
+   SUBJECTTO (SELECT fval = giv FROM sudoku WHERE giv),
+	  (SELECT sum(fval)=1 FROM sudoku GROUP BY col, row),
+	  (SELECT sum(fval)=1 FROM sudoku GROUP BY val, row),
+	  (SELECT sum(fval)=1 FROM sudoku GROUP BY val, col),
+	  (SELECT sum(fval)=1 FROM sudoku GROUP BY val, ((col-1) / 3), ((row-1) / 3))
+   WITH solverlp) s
+WHERE fval
+ORDER BY col, row;
+INFO:  GLPK Simplex Optimizer, v4.47
+354 rows, 729 columns, 2946 non-zeros
+      0: obj =   0.000000000e+00  infeas =  3.540e+02 (354)
+    500: obj =   0.000000000e+00  infeas =  4.346e+00 (103)
+*   579: obj =   0.000000000e+00  infeas =  1.948e-13 (95)
+OPTIMAL SOLUTION FOUND
+GLPK Integer Optimizer, v4.47
+354 rows, 729 columns, 2946 non-zeros
+729 integer variables, all of which are binary
+Integer optimization begins...
++   579: mip =     not found yet >=              -inf        (1; 0)
++   579: >>>>>   0.000000000e+00 >=   0.000000000e+00   0.0% (1; 0)
++   579: mip =   0.000000000e+00 >=     tree is empty   0.0% (0; 1)
+INTEGER OPTIMAL SOLUTION FOUND
+
+CONTEXT:  PL/pgSQL function sl_solve(sl_solve_query) line 209 at RETURN QUERY
+ id  | col | row | val | giv | fval 
+-----+-----+-----+-----+-----+------
+ 163 |   1 |   1 |   3 |     | t
+  83 |   1 |   2 |   2 |     | t
+ 651 |   1 |   3 |   9 |     | t
+ 490 |   1 |   4 |   7 | t   | t
+ 248 |   1 |   5 |   4 | t   | t
+ 573 |   1 |   6 |   8 | t   | t
+   7 |   1 |   7 |   1 |     | t
+ 413 |   1 |   8 |   6 | t   | t
+ 333 |   1 |   9 |   5 | t   | t
+ 253 |   2 |   1 |   4 |     | t
+ 578 |   2 |   2 |   8 |     | t
+ 417 |   2 |   3 |   6 | t   | t
+  13 |   2 |   4 |   1 |     | t
+  95 |   2 |   5 |   2 |     | t
+ 339 |   2 |   6 |   5 |     | t
+ 664 |   2 |   7 |   9 | t   | t
+ 503 |   2 |   8 |   7 |     | t
+ 180 |   2 |   9 |   3 | t   | t
+ 343 |   3 |   1 |   5 |     | t
+ 506 |   3 |   2 |   7 |     | t
+  21 |   3 |   3 |   1 |     | t
+ 184 |   3 |   4 |   3 |     | t
+ 428 |   3 |   5 |   6 |     | t
+ 672 |   3 |   6 |   9 |     | t
+ 592 |   3 |   7 |   8 | t   | t
+ 107 |   3 |   8 |   2 |     | t
+ 270 |   3 |   9 |   4 |     | t
+ 109 |   4 |   1 |   2 |     | t
+ 272 |   4 |   2 |   4 | t   | t
+ 354 |   4 |   3 |   5 |     | t
+ 679 |   4 |   4 |   9 |     | t
+ 599 |   4 |   5 |   8 | t   | t
+ 519 |   4 |   6 |   7 |     | t
+ 196 |   4 |   7 |   3 |     | t
+  35 |   4 |   8 |   1 | t   | t
+ 441 |   4 |   9 |   6 |     | t
+ 604 |   5 |   1 |   8 | t   | t
+  38 |   5 |   2 |   1 | t   | t
+ 201 |   5 |   3 |   3 |     | t
+ 121 |   5 |   4 |   2 | t   | t
+ 365 |   5 |   5 |   5 |     | t
+ 447 |   5 |   6 |   6 | t   | t
+ 286 |   5 |   7 |   4 |     | t
+ 692 |   5 |   8 |   9 | t   | t
+ 531 |   5 |   9 |   7 | t   | t
+ 451 |   6 |   1 |   6 |     | t
+ 695 |   6 |   2 |   9 | t   | t
+ 534 |   6 |   3 |   7 |     | t
+ 292 |   6 |   4 |   4 |     | t
+ 212 |   6 |   5 |   3 | t   | t
+  51 |   6 |   6 |   1 |     | t
+ 133 |   6 |   7 |   2 |     | t
+ 377 |   6 |   8 |   5 | t   | t
+ 621 |   6 |   9 |   8 |     | t
+  55 |   7 |   1 |   1 |     | t
+ 461 |   7 |   2 |   6 |     | t
+ 138 |   7 |   3 |   2 | t   | t
+ 625 |   7 |   4 |   8 |     | t
+ 545 |   7 |   5 |   7 |     | t
+ 303 |   7 |   6 |   4 |     | t
+ 385 |   7 |   7 |   5 |     | t
+ 224 |   7 |   8 |   3 |     | t
+ 711 |   7 |   9 |   9 |     | t
+ 550 |   8 |   1 |   7 | t   | t
+ 227 |   8 |   2 |   3 |     | t
+ 633 |   8 |   3 |   8 | t   | t
+ 391 |   8 |   4 |   5 |     | t
+ 716 |   8 |   5 |   9 |     | t
+ 150 |   8 |   6 |   2 |     | t
+ 475 |   8 |   7 |   6 | t   | t
+ 314 |   8 |   8 |   4 |     | t
+  72 |   8 |   9 |   1 |     | t
+ 721 |   9 |   1 |   9 | t   | t
+ 398 |   9 |   2 |   5 | t   | t
+ 318 |   9 |   3 |   4 |     | t
+ 481 |   9 |   4 |   6 | t   | t
+  77 |   9 |   5 |   1 | t   | t
+ 240 |   9 |   6 |   3 | t   | t
+ 565 |   9 |   7 |   7 |     | t
+ 647 |   9 |   8 |   8 |     | t
+ 162 |   9 |   9 |   2 |     | t
+(81 rows)
+
+select * from sudoku_tmp
+where fval
+order by col, row, val;
+ id | col | row | val | giv | fval 
+----+-----+-----+-----+-----+------
+(0 rows)
+
+drop table sudoku_tmp;
+-- Solve the optimization problem from the GLPK example, (glpk.pdf, Sec. 1.3.1)
+create table prob1
+(
+  id int,
+  o int,
+  v1 int,
+  v2 int,
+  v3 int,
+  x float8
+);
+insert into prob1(id, o, v1, v2, v3)
+values (1, 10, 1 ,10, 2),
+       (2,  6, 1 , 4, 2),
+       (3,  4, 1 , 5, 6);
+-- call the solver
+select lp_problem_solve(ARRAY[['tbl_name',  'prob1'],
+			      ['col_unique','id'],
+			      ['col_unknown','x'],
+			      ['obj_dir','maximize'],
+			      ['ctr_sql','SELECT x>=0 FROM prob1'],
+			      ['obj_sql','SELECT sum(x*o) FROM prob1'],
+			      ['ctr_sql','SELECT sum(x*v1)<=100 FROM prob1'],
+			      ['ctr_sql','SELECT sum(x*v2)<=600 FROM prob1'],
+			      ['ctr_sql','SELECT sum(x*v3)<=300 FROM prob1']
+			     ]);
+ERROR:  function lp_problem_solve(text[]) does not exist
+LINE 1: select lp_problem_solve(ARRAY[['tbl_name',  'prob1'],
+               ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+SOLVE x IN (SELECT * FROM prob1) as prob1
+MAXIMIZE (SELECT sum(x*o) FROM prob1)
+SUBJECTTO (SELECT x>=0 FROM prob1),
+	  (SELECT sum(x*v1)<=100 FROM prob1),
+	  (SELECT sum(x*v2)<=600 FROM prob1),
+	  (SELECT sum(x*v3)<=300 FROM prob1)
+WITH solverlp;
+INFO:  GLPK Simplex Optimizer, v4.47
+6 rows, 3 columns, 12 non-zeros
+*     0: obj =   0.000000000e+00  infeas =  0.000e+00 (0)
+*     3: obj =   7.333333333e+02  infeas =  0.000e+00 (0)
+OPTIMAL SOLUTION FOUND
+
+CONTEXT:  PL/pgSQL function sl_solve(sl_solve_query) line 209 at RETURN QUERY
+ id | o  | v1 | v2 | v3 |        x         
+----+----+----+----+----+------------------
+  1 | 10 |  1 | 10 |  2 | 33.3333333333333
+  2 |  6 |  1 |  4 |  2 | 66.6666666666667
+  3 |  4 |  1 |  5 |  6 |                0
+(3 rows)
+
+select * from prob1;
+ id | o  | v1 | v2 | v3 | x 
+----+----+----+----+----+---
+  1 | 10 |  1 | 10 |  2 |  
+  2 |  6 |  1 |  4 |  2 |  
+  3 |  4 |  1 |  5 |  6 |  
+(3 rows)
+
+drop table prob1;

@@ -1,0 +1,10 @@
+prefix=/home/laurynas/Projects/SolveDB_pg11.2_ext/LPsolver_v1.6/pgCbc/Cbc-2.9.4
+libdir=/home/laurynas/Projects/SolveDB_pg11.2_ext/LPsolver_v1.6/pgCbc/Cbc-2.9.4/Cbc/src/OsiCbc
+
+Name: OsiCbc
+Description: COIN-OR Open Solver Interface for CBC
+URL: https://projects.coin-or.org/Osi
+Version: 2.9.4
+Libs: ${libdir}/libOsiCbc.la
+Cflags: -I/home/laurynas/Projects/SolveDB_pg11.2_ext/LPsolver_v1.6/pgCbc/Cbc-2.9.4/Cbc/src/OsiCbc
+Requires: cbc

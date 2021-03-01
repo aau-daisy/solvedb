@@ -1,0 +1,10 @@
+prefix=/home/laurynas/Projects/SolveDB_pg11.2_ext/LPsolver_v1.6/pgCbc/Cbc-2.9.4
+libdir=/home/laurynas/Projects/SolveDB_pg11.2_ext/LPsolver_v1.6/pgCbc/Cbc-2.9.4/Osi/src/Osi
+
+Name: Osi
+Description: COIN-OR Open Solver Interface
+URL: https://projects.coin-or.org/Osi
+Version: 0.107.4
+Libs: ${libdir}/libOsi.la 
+Cflags: -I/home/laurynas/Projects/SolveDB_pg11.2_ext/LPsolver_v1.6/pgCbc/Cbc-2.9.4/Osi/src/Osi -I/home/laurynas/Projects/SolveDB_pg11.2_ext/LPsolver_v1.6/pgCbc/Cbc-2.9.4/Osi/src/Osi
+Requires: coinutils 
